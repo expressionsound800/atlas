@@ -1,0 +1,436 @@
+#!/usr/bin/env node
+
+/*
+ * Atlas Code Documentation Coverage Audit reads the source-only export manifest
+ * or a candidate's public provenance ledger and measures the exact Core, Graph,
+ * and bootstrap source surface that users receive. Component-source mode also
+ * checks next-release Atlas Core modules and commands before export. Every code
+ * file requires a specific purpose header and every
+ * named function requires a substantive adjacent explanation. Raw comment
+ * density and repeated template prose do not satisfy those contracts.
+ */
+
+import fs from "node:fs";
+import path from "node:path";
+
+const DEFAULT_ATLAS_SOURCE = path.resolve(import.meta.dirname, "..");
+const DEFAULT_GRAPH_SOURCE = path.resolve(DEFAULT_ATLAS_SOURCE, "..", "multihead-memory-graph");
+const DEFAULT_MANIFEST = path.join(DEFAULT_ATLAS_SOURCE, "distribution", "export-manifest.json");
+const FUNCTION_ACTION_TERMS = Object.freeze([
+  "accepts", "adapts", "adds", "appends", "applies", "assigns", "attaches", "binds", "buckets", "builds",
+  "cancels", "centers", "checks", "chooses", "classifies", "clamps", "clears", "closes", "collapses", "collects", "commits", "compares",
+  "computes", "converts", "copies", "counts", "creates", "debounces", "decodes", "deduplicates", "delegates", "derives", "describes", "detects", "dispatches", "distributes",
+  "emits", "encodes", "ends", "ensures", "estimates", "evaluates", "expands", "exposes", "extracts", "fetches", "finalizes", "finds", "forces", "formats",
+  "groups", "hides", "indexes", "installs", "joins", "loads", "locates", "maps", "marks", "measures", "merges", "mounts", "moves",
+  "normalizes", "opens", "orchestrates", "orders", "owns", "parses", "persists", "polls", "positions", "preserves", "prints", "ranks", "reads", "rebuilds", "recenters", "recomputes", "reconciles", "reconstructs", "records", "redacts", "reduces", "redistributes", "rejects", "releases", "removes", "renders", "repeats", "replaces", "repositions", "reports", "requests", "resolves", "returns", "reverses", "rewrites", "rounds", "routes", "runs",
+  "samples", "scans", "schedules", "scores", "selects", "sends", "serializes", "snaps", "splits", "starts", "stops", "switches", "synchronizes",
+  "toggles", "translates", "traverses", "trims", "updates", "validates", "verifies", "waits", "wraps", "writes", "zooms",
+]);
+const GENERIC_COMMENT_PATTERNS = Object.freeze([
+  /handles? (?:the|this) function/iu,
+  /helper function/iu,
+  /performs? (?:the|this) operation/iu,
+  /processes? (?:the|this) input/iu,
+  /does? the work/iu,
+  /utility function/iu,
+  /function documentation/iu,
+]);
+const CONTROL_NAMES = new Set(["await", "catch", "for", "if", "return", "switch", "throw", "while", "with"]);
+
+/**
+ * Parses source-root, manifest, candidate, and output options and returns one
+ * normalized audit configuration without consulting repository-local state.
+ */
+function parseArgs(argv) {
+  const options = {
+    atlasSource: DEFAULT_ATLAS_SOURCE,
+    graphSource: DEFAULT_GRAPH_SOURCE,
+    manifestPath: DEFAULT_MANIFEST,
+    candidateRoot: "",
+    json: false,
+    top: 40,
+  };
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "--atlas-source") options.atlasSource = path.resolve(argv[++index] || "");
+    else if (argument === "--graph-source") options.graphSource = path.resolve(argv[++index] || "");
+    else if (argument === "--manifest") options.manifestPath = path.resolve(argv[++index] || "");
+    else if (argument === "--candidate-root") options.candidateRoot = path.resolve(argv[++index] || "");
+    else if (argument === "--top") options.top = Number(argv[++index] || options.top);
+    else if (argument === "--json") options.json = true;
+    else if (argument === "--help" || argument === "-h") {
+      printHelp();
+      process.exit(0);
+    } else throw new Error(`Unknown argument: ${argument}`);
+  }
+  if (!Number.isSafeInteger(options.top) || options.top < 1) throw new Error("--top requires a positive integer");
+  return options;
+}
+
+/**
+ * Prints the two supported audit modes and the source overrides used by local
+ * component checkouts and generated public candidates.
+ */
+function printHelp() {
+  console.log(`Usage:
+  scripts/atlas-code-documentation-coverage-audit [--atlas-source PATH] [--graph-source PATH] [--manifest PATH] [--json]
+  scripts/atlas-code-documentation-coverage-audit --candidate-root PATH [--json]
+
+The audit passes only when every exported code file has a substantive purpose
+header and every named JavaScript or shell function has a specific adjacent
+explanation. Duplicate and generic function comments are rejected.`);
+}
+
+/**
+ * Reads the source build recipe or reduces a public candidate ledger to the
+ * same destination-file inventory without recovering private source routing.
+ */
+function readManifest(options) {
+  if (options.candidateRoot) {
+    const ledgerPath = path.join(options.candidateRoot, "ATLAS_COMPONENTS.json");
+    const ledger = JSON.parse(fs.readFileSync(ledgerPath, "utf8"));
+    if (!Array.isArray(ledger.files)) throw new Error("Atlas public provenance requires files");
+    return {
+      components: [{
+        id: "atlas-public-candidate",
+        source: "candidate",
+        destination: ".",
+        files: ledger.files.map((file) => String(file.path || "")).filter(Boolean),
+      }],
+    };
+  }
+  const manifest = JSON.parse(fs.readFileSync(options.manifestPath, "utf8"));
+  if (!Array.isArray(manifest.components)) throw new Error("Atlas export manifest requires components");
+  return manifest;
+}
+
+/**
+ * Returns the manifest source path for string and transformed file entries so
+ * the audit evaluates canonical source rather than generated destination bytes.
+ */
+function sourceRelative(entry) {
+  return typeof entry === "string" ? entry : String(entry?.source || "");
+}
+
+/**
+ * Maps one manifest entry to its generated public path using the same
+ * component destination and per-file destination rules as the exporter.
+ */
+function destinationRelative(component, entry) {
+  const source = sourceRelative(entry);
+  const destination = typeof entry === "string" ? source : String(entry?.destination || source);
+  return path.join(String(component.destination || "."), destination);
+}
+
+/**
+ * Classifies commentable code by extension or executable shebang while leaving
+ * JSON locks, fonts, version files, and prose documents to their native formats.
+ */
+function sourceLanguage(filePath, source) {
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === ".js" || extension === ".mjs") return "javascript";
+  if (extension === ".css") return "css";
+  if (extension === ".html") return "html";
+  if (/^#!.*\bnode\b/u.test(source)) return "javascript";
+  if (/^#!.*\b(?:bash|sh)\b/u.test(source)) return "shell";
+  return "";
+}
+
+/**
+ * Collects each unique public code source from either canonical component
+ * checkouts or a generated candidate and reports manifest paths that are absent.
+ */
+function collectCodeFiles(options, manifest) {
+  const files = [];
+  const missing = [];
+  const seen = new Set();
+  /** Adds one canonical or candidate file once, then classifies whether its source is commentable code. */
+  const addFile = (component, relative, sourceRoot) => {
+    const absolute = path.resolve(sourceRoot, relative);
+    const identity = path.normalize(absolute);
+    if (seen.has(identity)) return;
+    seen.add(identity);
+    if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) {
+      missing.push({ component, path: relative });
+      return;
+    }
+    const source = fs.readFileSync(absolute, "utf8");
+    const language = sourceLanguage(relative, source);
+    if (language) files.push({ component, path: relative, absolute, source, language });
+  };
+  for (const component of manifest.components) {
+    const sourceRoot = component.source === "graph" ? options.graphSource : options.atlasSource;
+    for (const entry of component.files || []) {
+      const relative = options.candidateRoot
+        ? destinationRelative(component, entry)
+        : sourceRelative(entry);
+      addFile(component.id, relative, options.candidateRoot || sourceRoot);
+    }
+  }
+  if (!options.candidateRoot) {
+    // Source mode covers the next-release Core candidates as well as the exact
+    // currently reviewed public payload. Candidate mode remains manifest-exact.
+    const developmentCandidates = [
+      ...fs.readdirSync(path.join(options.atlasSource, "product"))
+        .filter((name) => name.endsWith(".mjs"))
+        .map((name) => `product/${name}`),
+      ...fs.readdirSync(path.join(options.atlasSource, "scripts"))
+        .filter((name) => name.startsWith("atlas") || name.startsWith("repository-provider"))
+        .map((name) => `scripts/${name}`),
+    ].sort();
+    for (const relative of developmentCandidates) addFile("atlas-core-development", relative, options.atlasSource);
+  }
+  return { files, missing };
+}
+
+/**
+ * Removes comment delimiters and collapses whitespace so quality and duplicate
+ * checks compare the explanatory prose rather than its syntax.
+ */
+function normalizeComment(lines) {
+  return lines
+    .map((line) => line.trim()
+      .replace(/^\/\*+!?\s?/u, "")
+      .replace(/^\*\s?/u, "")
+      .replace(/\*\/$/u, "")
+      .replace(/^\/\/\/?!?\s?/u, "")
+      .replace(/^#\s?/u, "")
+      .replace(/^<!--\s?/u, "")
+      .replace(/-->$/u, ""))
+    .join(" ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+/**
+ * Reads the contiguous line, block, shell, or HTML comment immediately above
+ * a definition and returns both its text and starting line for diagnostics.
+ */
+function precedingComment(lines, definitionIndex) {
+  let cursor = definitionIndex - 1;
+  while (cursor >= 0 && !lines[cursor].trim()) cursor -= 1;
+  if (cursor < 0) return { text: "", line: 0 };
+  const end = cursor;
+  const trimmed = lines[cursor].trim();
+  if (trimmed.endsWith("*/")) {
+    while (cursor >= 0 && !lines[cursor].includes("/*")) cursor -= 1;
+    if (cursor < 0) return { text: "", line: 0 };
+    return { text: normalizeComment(lines.slice(cursor, end + 1)), line: cursor + 1 };
+  }
+  if (trimmed.endsWith("-->")) {
+    while (cursor >= 0 && !lines[cursor].includes("<!--")) cursor -= 1;
+    if (cursor < 0) return { text: "", line: 0 };
+    return { text: normalizeComment(lines.slice(cursor, end + 1)), line: cursor + 1 };
+  }
+  if (trimmed.startsWith("//") || trimmed.startsWith("#")) {
+    const marker = trimmed.startsWith("//") ? "//" : "#";
+    while (cursor > 0 && lines[cursor - 1].trim().startsWith(marker)) cursor -= 1;
+    return { text: normalizeComment(lines.slice(cursor, end + 1)), line: cursor + 1 };
+  }
+  return { text: "", line: 0 };
+}
+
+/**
+ * Finds the first substantive code line and treats its adjacent leading comment
+ * as the file-purpose header, ignoring shebangs and strict-mode directives.
+ */
+function fileHeader(lines) {
+  let firstCode = 0;
+  while (firstCode < lines.length) {
+    const trimmed = lines[firstCode].trim();
+    if (!trimmed
+      || trimmed.startsWith("#!")
+      || trimmed === '"use strict";'
+      || trimmed === "'use strict';"
+      || trimmed === "set -euo pipefail") {
+      firstCode += 1;
+      continue;
+    }
+    if (trimmed.startsWith("/*") || trimmed.startsWith("//") || trimmed.startsWith("#") || trimmed.startsWith("<!--")) {
+      let end = firstCode;
+      if (trimmed.startsWith("/*") && !trimmed.includes("*/")) while (end + 1 < lines.length && !lines[end].includes("*/")) end += 1;
+      else if (trimmed.startsWith("<!--") && !trimmed.includes("-->")) while (end + 1 < lines.length && !lines[end].includes("-->")) end += 1;
+      else if (trimmed.startsWith("//")) while (end + 1 < lines.length && lines[end + 1].trim().startsWith("//")) end += 1;
+      else if (trimmed.startsWith("#")) while (end + 1 < lines.length && lines[end + 1].trim().startsWith("#")) end += 1;
+      return { text: normalizeComment(lines.slice(firstCode, end + 1)), line: firstCode + 1 };
+    }
+    break;
+  }
+  return { text: "", line: 0 };
+}
+
+/**
+ * Locates named JavaScript declarations, assigned functions, object/class
+ * methods, and shell functions that require their own adjacent explanation.
+ */
+function findFunctions(lines, language) {
+  const definitions = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (language === "shell") {
+      const shell = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\)\s*\{/u.exec(line);
+      if (shell) definitions.push({ name: shell[1], line: index + 1, index });
+      continue;
+    }
+    if (language !== "javascript") continue;
+    const declared = /^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/u.exec(line);
+    if (declared) {
+      definitions.push({ name: declared[1], line: index + 1, index });
+      continue;
+    }
+    const assigned = /^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/u.exec(line);
+    let assignmentRhs = assigned ? line.slice(line.indexOf("=") + 1) : "";
+    for (let offset = 1; assigned && offset < 8 && !/[;]|=>/u.test(assignmentRhs); offset += 1) {
+      assignmentRhs += ` ${lines[index + offset] || ""}`;
+    }
+    if (assigned && /^\s*(?:async\s*)?(?:function\b|\([^()]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)/u.test(assignmentRhs)) {
+      definitions.push({ name: assigned[1], line: index + 1, index });
+      continue;
+    }
+    const method = /^\s+(?:(?:static|async|get|set)\s+)*([A-Za-z_$][\w$]*)\s*\(/u.exec(line);
+    let methodSignature = method ? line : "";
+    for (let offset = 1; method && offset < 8 && !/[;{]/u.test(methodSignature); offset += 1) {
+      methodSignature += ` ${lines[index + offset] || ""}`;
+    }
+    const openingBrace = methodSignature.indexOf("{");
+    const statementEnd = methodSignature.indexOf(";");
+    const definitionPrefix = statementEnd < 0 ? methodSignature : methodSignature.slice(0, statementEnd);
+    const definesMethod = openingBrace >= 0 && /\)\s*\{/u.test(definitionPrefix);
+    if (method && !CONTROL_NAMES.has(method[1]) && definesMethod) {
+      definitions.push({ name: method[1], line: index + 1, index });
+    }
+  }
+  return definitions;
+}
+
+/**
+ * Evaluates one explanation for minimum substance, a concrete behavior verb,
+ * and prohibited boilerplate while preserving the original prose for review.
+ */
+function commentFindings(text, kind) {
+  const findings = [];
+  const words = text.match(/[A-Za-z0-9][A-Za-z0-9'/-]*/gu) || [];
+  const minimumWords = kind === "file" ? 14 : 8;
+  if (words.length < minimumWords) findings.push(`${kind} explanation has fewer than ${minimumWords} words`);
+  if (kind === "function" && !FUNCTION_ACTION_TERMS.some((term) => new RegExp(`\\b${term}\\b`, "iu").test(text))) {
+    findings.push("function explanation does not state a concrete behavior or contract");
+  }
+  if (GENERIC_COMMENT_PATTERNS.some((pattern) => pattern.test(text))) findings.push(`${kind} explanation uses generic template prose`);
+  return findings;
+}
+
+/**
+ * Audits one public code file and returns header, function, and prose-quality
+ * findings with stable source lines for focused remediation.
+ */
+function auditFile(file) {
+  const lines = file.source.split(/\r?\n/gu);
+  const header = fileHeader(lines);
+  const findings = [];
+  if (!header.text) findings.push({ kind: "file-header", line: 1, message: "missing file-purpose explanation" });
+  else for (const message of commentFindings(header.text, "file")) findings.push({ kind: "file-header", line: header.line, message });
+  const functions = findFunctions(lines, file.language).map((definition) => {
+    const comment = precedingComment(lines, definition.index);
+    const rowFindings = [];
+    if (!comment.text) rowFindings.push("missing adjacent function explanation");
+    else rowFindings.push(...commentFindings(comment.text, "function"));
+    for (const message of rowFindings) findings.push({ kind: "function", name: definition.name, line: definition.line, message });
+    return { ...definition, comment: comment.text, commentLine: comment.line, findings: rowFindings };
+  });
+  return { component: file.component, path: file.path, language: file.language, header, functions, findings };
+}
+
+/**
+ * Rejects repeated normalized prose across different named functions because
+ * one copied sentence cannot explain distinct contracts without review.
+ */
+function duplicateCommentFindings(rows) {
+  const occurrences = new Map();
+  for (const row of rows) {
+    for (const fn of row.functions) {
+      const key = fn.comment.toLowerCase();
+      if (!key) continue;
+      const list = occurrences.get(key) || [];
+      list.push({ path: row.path, name: fn.name, line: fn.line });
+      occurrences.set(key, list);
+    }
+  }
+  const duplicates = [];
+  for (const [comment, functions] of occurrences) {
+    if (functions.length > 1) duplicates.push({ comment, functions });
+  }
+  return duplicates;
+}
+
+/**
+ * Builds the strict pass/fail metrics used by pre-release review and keeps
+ * missing manifest files separate from documentation-quality findings.
+ */
+function buildReport(options) {
+  const manifest = readManifest(options);
+  const collected = collectCodeFiles(options, manifest);
+  const files = collected.files.map(auditFile);
+  const duplicateComments = duplicateCommentFindings(files);
+  const functionCount = files.reduce((sum, row) => sum + row.functions.length, 0);
+  const documentedFunctions = files.reduce((sum, row) => sum + row.functions.filter((fn) => fn.findings.length === 0).length, 0);
+  const documentedFiles = files.filter((row) => !row.findings.some((finding) => finding.kind === "file-header")).length;
+  const findingCount = collected.missing.length
+    + duplicateComments.length
+    + files.reduce((sum, row) => sum + row.findings.length, 0);
+  return {
+    schema: "multihead-atlas.code_documentation_coverage.v1",
+    status: findingCount === 0 ? "pass" : "fail",
+    mode: options.candidateRoot ? "public-candidate" : "component-source",
+    metrics: {
+      codeFiles: files.length,
+      documentedFiles,
+      fileCoveragePercent: files.length ? Number(((documentedFiles / files.length) * 100).toFixed(2)) : 100,
+      namedFunctions: functionCount,
+      documentedFunctions,
+      functionCoveragePercent: functionCount ? Number(((documentedFunctions / functionCount) * 100).toFixed(2)) : 100,
+      duplicateFunctionComments: duplicateComments.length,
+      missingManifestFiles: collected.missing.length,
+      findingCount,
+    },
+    missingManifestFiles: collected.missing,
+    duplicateFunctionComments: duplicateComments,
+    files,
+  };
+}
+
+/**
+ * Prints the coverage boundary and the first actionable findings while JSON
+ * mode retains the complete per-file and per-function review record.
+ */
+function printText(report, top) {
+  console.log("# Atlas Code Documentation Coverage Audit");
+  console.log(`status: ${report.status}`);
+  console.log(`mode: ${report.mode}`);
+  console.log(`files: ${report.metrics.documentedFiles}/${report.metrics.codeFiles} (${report.metrics.fileCoveragePercent}%)`);
+  console.log(`functions: ${report.metrics.documentedFunctions}/${report.metrics.namedFunctions} (${report.metrics.functionCoveragePercent}%)`);
+  console.log(`duplicate function comments: ${report.metrics.duplicateFunctionComments}`);
+  console.log(`findings: ${report.metrics.findingCount}`);
+  let printed = 0;
+  for (const row of report.files) {
+    for (const finding of row.findings) {
+      if (printed >= top) return;
+      const target = finding.name ? `${row.path}:${finding.line} ${finding.name}` : `${row.path}:${finding.line}`;
+      console.log(`- ${target}: ${finding.message}`);
+      printed += 1;
+    }
+  }
+}
+
+/**
+ * Runs the strict manifest-scoped audit and returns a non-zero exit when any
+ * public code file or named function lacks accepted explanatory coverage.
+ */
+function main() {
+  const options = parseArgs(process.argv.slice(2));
+  const report = buildReport(options);
+  if (options.json) console.log(JSON.stringify(report, null, 2));
+  else printText(report, options.top);
+  if (report.status !== "pass") process.exitCode = 1;
+}
+
+main();

@@ -1,0 +1,157 @@
+#!/usr/bin/env node
+
+/*
+ * Installation Contract Test proves repository-local placement, exact package
+ * version capture, digest verification, runtime-tamper detection, and staging
+ * cleanup using a caller-supplied registered technical-space root.
+ */
+
+import childProcess from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import {
+  ATLAS_INSTALLATION_MANIFEST_SCHEMA,
+  installAtlasRuntime,
+  validateAtlasInstallationManifest,
+  verifyAtlasInstallation,
+} from "../product/installation-contract.mjs";
+
+/** Reads an installation-fixture option from separated or equals-prefixed CLI syntax. */
+function argValue(name, fallback = "") {
+  const exact = process.argv.indexOf(name);
+  if (exact >= 0) return process.argv[exact + 1] || fallback;
+  const prefixed = process.argv.find((arg) => arg.startsWith(`${name}=`));
+  return prefixed ? prefixed.slice(name.length + 1) : fallback;
+}
+
+/** Checks one installation or tamper-detection invariant and reports its exact failure. */
+function check(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+/** Verifies that an invalid installation manifest rejects with the expected explanation. */
+function rejects(operation, expected) {
+  try {
+    operation();
+  } catch (error) {
+    check(String(error?.message || error).includes(expected), `unexpected rejection: ${error}`);
+    return;
+  }
+  throw new Error(`expected rejection containing: ${expected}`);
+}
+
+/** Returns product-owned runtime staging siblings left in the installation root. */
+function runtimeStagingPaths(root) {
+  const atlasRoot = path.join(root, ".atlas");
+  if (!fs.existsSync(atlasRoot)) return [];
+  return fs.readdirSync(atlasRoot).filter((entry) => entry.startsWith("runtime.installing-"));
+}
+
+const workRoot = path.resolve(argValue("--work-root"));
+const atlasSource = path.resolve(argValue("--atlas-source", path.resolve(import.meta.dirname, "..")));
+const graphSource = path.resolve(argValue("--graph-source"));
+check(path.isAbsolute(workRoot) && argValue("--work-root"), "--work-root must be an absolute registered technical-space path");
+check(argValue("--graph-source"), "--graph-source is required");
+
+const atlasVersion = fs.readFileSync(path.join(atlasSource, "VERSION"), "utf8").trim();
+const graphVersion = JSON.parse(fs.readFileSync(path.join(graphSource, "package.json"), "utf8")).version;
+const manifest = {
+  schema: ATLAS_INSTALLATION_MANIFEST_SCHEMA,
+  installationId: "fixture-repository",
+  scope: "repository",
+  runtimePath: ".atlas/runtime",
+  statePath: ".atlas/state",
+  packages: {
+    atlas: { version: atlasVersion },
+    graph: { version: graphVersion },
+  },
+};
+
+rejects(() => validateAtlasInstallationManifest({ ...manifest, runtimePath: "../runtime" }), "must stay inside");
+rejects(() => validateAtlasInstallationManifest({ ...manifest, statePath: ".atlas/runtime/state" }), "must not overlap");
+rejects(() => validateAtlasInstallationManifest({ ...manifest, scope: "computer" }), "scope must be one of");
+
+fs.rmSync(workRoot, { recursive: true, force: true });
+fs.mkdirSync(path.join(workRoot, ".atlas"), { recursive: true });
+fs.mkdirSync(path.join(workRoot, ".atlas", "runtime.installing-999999"), { recursive: true });
+const manifestPath = path.join(workRoot, ".atlas", "atlas.install.json");
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+const installed = installAtlasRuntime({ root: workRoot, manifestPath, atlasSource, graphSource, allowSourceChanges: true });
+check(runtimeStagingPaths(workRoot).length === 0, "fresh installation did not remove abandoned runtime staging");
+const initial = verifyAtlasInstallation({ root: workRoot, manifestPath });
+check(initial.status === "pass", "fresh installation did not verify");
+check(initial.packages.atlas.version === atlasVersion, "Atlas version changed during installation");
+check(initial.packages.graph.version === graphVersion, "Memory Graph version changed during installation");
+check(initial.contracts.evidence.status === "frozen", "installed Evidence contract is not frozen");
+check(initial.contracts.evidence.protocolSchema === "multihead-atlas.instance_evidence.v2", "installed Evidence schema changed");
+check(initial.contracts.evidence.atlasCore.introducedIn === "0.3.0", "installed Evidence compatibility boundary changed");
+check(initial.contracts.evidence.atlasCore.installedVersion === atlasVersion, "installed Evidence lock did not record the Atlas Core version");
+const initialLock = JSON.parse(fs.readFileSync(path.join(workRoot, ".atlas", "atlas.lock.json"), "utf8"));
+check(initialLock.schema === "multihead-atlas.installation_lock.v3", "fresh installation did not use the reversible integration lock schema");
+const installedGraphLauncher = path.join(installed.runtimeRoot, "atlas", "scripts", "atlas-graph");
+check(fs.existsSync(installedGraphLauncher), "installed Atlas graph launcher is missing");
+const launcherHelp = childProcess.spawnSync(process.execPath, [installedGraphLauncher, "--help"], {
+  cwd: workRoot,
+  encoding: "utf8",
+});
+check(launcherHelp.status === 0 && launcherHelp.stdout.includes("--provider-command"), "installed Atlas graph launcher help contract failed");
+const installedSync = path.join(installed.runtimeRoot, "atlas", "scripts", "atlas-sync");
+check(fs.existsSync(installedSync), "installed Atlas sync command is missing");
+const syncContract = childProcess.spawnSync(process.execPath, [installedSync, "contract"], {
+  cwd: workRoot,
+  encoding: "utf8",
+});
+check(syncContract.status === 0 && syncContract.stdout.includes("multihead-atlas.sync_protocol_contract.v1"), "installed Atlas sync contract failed");
+for (const relative of [
+  "product/agent-invocation-contract.mjs",
+  "product/docs/EVIDENCE_V2.md",
+  "product/instance-contract.mjs",
+  "product/evidence-contract.mjs",
+  "product/evidence-release.json",
+  "product/generation-provider.mjs",
+  "product/uninstall-contract.mjs",
+  "scripts/atlas",
+  "scripts/atlas-generation-mock",
+  "scripts/atlas-generation-openai",
+  "scripts/atlas-init",
+  "scripts/atlas-provider",
+  "scripts/atlas-uninstall",
+]) {
+  check(fs.existsSync(path.join(installed.runtimeRoot, "atlas", relative)), `installed Atlas instance runtime is missing ${relative}`);
+}
+
+fs.appendFileSync(path.join(installed.runtimeRoot, "atlas", "product", "repository-provider.mjs"), "\n// tamper probe\n");
+const tampered = verifyAtlasInstallation({ root: workRoot, manifestPath });
+check(tampered.status === "fail" && tampered.failures.some((failure) => failure.package === "atlas"), "runtime tamper was not detected");
+installAtlasRuntime({ root: workRoot, manifestPath, atlasSource, graphSource, allowSourceChanges: true });
+const restored = verifyAtlasInstallation({ root: workRoot, manifestPath });
+check(restored.status === "pass", "reinstalled runtime did not verify");
+const mismatchedManifest = {
+  ...manifest,
+  packages: {
+    ...manifest.packages,
+    atlas: { ...manifest.packages.atlas, revision: "0000000000000000000000000000000000000000" },
+  },
+};
+fs.writeFileSync(manifestPath, `${JSON.stringify(mismatchedManifest, null, 2)}\n`);
+rejects(() => installAtlasRuntime({ root: workRoot, manifestPath, atlasSource, graphSource, allowSourceChanges: true }), "does not match manifest revision");
+check(runtimeStagingPaths(workRoot).length === 0, "rejected revision left runtime staging behind");
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+console.log(JSON.stringify({
+  schema: "multihead-atlas.installation_contract_test.v1",
+  status: "pass",
+  installationId: restored.installationId,
+  scope: restored.scope,
+  runtimeRoot: restored.runtimeRoot,
+  stateRoot: restored.stateRoot,
+  packages: {
+    atlas: { version: restored.packages.atlas.version, revision: restored.packages.atlas.revision, digest: restored.packages.atlas.digest, files: restored.packages.atlas.fileCount },
+    graph: { version: restored.packages.graph.version, revision: restored.packages.graph.revision, digest: restored.packages.graph.digest, files: restored.packages.graph.fileCount },
+  },
+  evidence: restored.contracts.evidence,
+  tamperDetection: "pass",
+  stagingCleanup: "pass",
+  graphLauncher: "pass",
+  syncProtocol: "pass",
+}, null, 2));

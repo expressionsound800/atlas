@@ -1,0 +1,660 @@
+{
+  "schema": "multihead-atlas.public_components.v3",
+  "distribution": {
+    "name": "atlas-public-distribution",
+    "version": "0.3.0",
+    "publicationReady": true,
+    "reviewedPayloadTreeDigest": "0e1d285b47c6ebbf07c0b997cdce1c17cea554cae212bd5bbead20c6b0fdcfea"
+  },
+  "components": {
+    "atlas-public-metadata": {
+      "version": "",
+      "revision": "ea9e7af727d0d1fa4b5b6e95401a2d7c14c8bde7",
+      "sourceState": "committed",
+      "reviewState": "not-versioned"
+    },
+    "atlas-core": {
+      "version": "0.6.0",
+      "revision": "ea9e7af727d0d1fa4b5b6e95401a2d7c14c8bde7",
+      "sourceState": "committed",
+      "reviewState": "reviewed"
+    },
+    "atlas-graph": {
+      "version": "0.7.0",
+      "revision": "4c811582c8d10d0a94f7b13bb45f2d718cf950d2",
+      "sourceState": "committed",
+      "reviewState": "reviewed"
+    }
+  },
+  "contracts": {
+    "evidence": {
+      "protocolSchema": "multihead-atlas.instance_evidence.v2",
+      "contractSchema": "multihead-atlas.instance_evidence_contract.v2",
+      "contractVersion": 2,
+      "status": "frozen",
+      "specificationDigest": "adbbb7cee969d92de610b0cdb5182e2074ae8b7d037578915a318761b86ba833",
+      "releaseRecordDigest": "218ebea14a64fb23e7e52c7a512cdab662e0d5f05ec0c0c9fb08f9462bddee48",
+      "implementationDigest": "f559cc8bf3688a0dc4bd1327892192103d1d3df74192fe198bf60f4f1e9eb8ed",
+      "atlasCore": {
+        "version": "0.6.0",
+        "introducedIn": "0.3.0"
+      },
+      "compatibility": {
+        "atlasCore": {
+          "introducedIn": "0.3.0",
+          "implementationBoundary": "atlas-core"
+        },
+        "atlasGraph": {
+          "required": false,
+          "compatibleCheckpoint": "0.6.1"
+        },
+        "agentInvocation": {
+          "contract": "multihead-atlas.agent_invocation.v1",
+          "evidenceSchema": "multihead-atlas.instance_evidence.v2"
+        }
+      },
+      "independentGitBoundary": false
+    }
+  },
+  "payloadTreeDigest": "0e1d285b47c6ebbf07c0b997cdce1c17cea554cae212bd5bbead20c6b0fdcfea",
+  "publicationReview": {
+    "status": "approved-payload",
+    "reviewedPayloadTreeDigest": "0e1d285b47c6ebbf07c0b997cdce1c17cea554cae212bd5bbead20c6b0fdcfea",
+    "actualPayloadTreeDigest": "0e1d285b47c6ebbf07c0b997cdce1c17cea554cae212bd5bbead20c6b0fdcfea",
+    "matches": true
+  },
+  "files": [
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "ee9597ce93281a8e920b014a3244e28367cac80235ecba3121d42296ff31f101",
+      "bytes": 2203,
+      "mode": "0644"
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "sha256": "3e5916fd134a4474e5d573fa97d430df939659e5b28cad850dc649f19a1c0313",
+      "bytes": 501,
+      "mode": "0644"
+    },
+    {
+      "path": "core/CHANGELOG.md",
+      "sha256": "4fc770ff02bcf7cdbdce03a2a62260567c809c7a678730c98b677e60430a9e5f",
+      "bytes": 3631,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/agent-invocation-contract.mjs",
+      "sha256": "6dfe4abba44682bb6ba7586ec0ea19f19dc80ef0dad95654b77fb3a2eb4b1792",
+      "bytes": 12274,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/docs/AGENT_RAG_WORKFLOW.md",
+      "sha256": "efbf7baa2e7fe1fb081038cb70b0e1f584e72d93fd4d4aef505060b88559d7f4",
+      "bytes": 6868,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/docs/ARCHITECTURE.md",
+      "sha256": "ae21a7bfb4694819a647fab37ba1319a6f49bd3601ca1c087deb194f6a9ab393",
+      "bytes": 11161,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/docs/EVIDENCE_SOURCES_AND_MAPPING.md",
+      "sha256": "7ef0d867292b34ca4b052d53ce1c9c9f2e34a7a7532cc28a5f88c59168ddc195",
+      "bytes": 26124,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/docs/EVIDENCE_V2.md",
+      "sha256": "adbbb7cee969d92de610b0cdb5182e2074ae8b7d037578915a318761b86ba833",
+      "bytes": 3577,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/docs/GENERATION_PROVIDERS.md",
+      "sha256": "2abcdd3a27e4a44f1026c3260d2b0296c1576fc1ff8225682805017a66a8fcc1",
+      "bytes": 8740,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/docs/INSTALLATION.md",
+      "sha256": "0ad5012b075c5fa946bd32b13427d22394c882f507c96e7c417e3e5ae97a0682",
+      "bytes": 5697,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/docs/INSTANCE.md",
+      "sha256": "36ac30628138699962e633f08d3ddf84186d65c99bef09e24dfe0a3a59d9d230",
+      "bytes": 9403,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/docs/KNOWN_LIMITATIONS.md",
+      "sha256": "e82bc0ad21a59ee019af928c7c177b95be59f5980aaac0c78e3fe14901e5684c",
+      "bytes": 1798,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/docs/RESEARCH_FOUNDATIONS.md",
+      "sha256": "21b6d8af0fd4f426909abd9f77db60aeccf357ee4f300a908848bde1e72faec3",
+      "bytes": 8050,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/docs/SYNC.md",
+      "sha256": "553fbf68adac08513881eeaf6cb03196963d2ea0c1e55d01d581a4944f2ae03e",
+      "bytes": 4481,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/docs/TAXONOMY.md",
+      "sha256": "955c6ff48b6e63cfe290b9d275fb802dfe1803e1aa5d26b6b754360ae555b394",
+      "bytes": 6768,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/docs/UNINSTALLATION.md",
+      "sha256": "69faedf572fb5df7f79633d0f318e0c47509d6b68091f91ca0881ad5a5fae1a1",
+      "bytes": 5929,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/docs/VERSIONING.md",
+      "sha256": "f9768071ab2a9f872737c624f95cb4613ec2fd0b9ece27fe7bf76a59994bed06",
+      "bytes": 4887,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/docs/WALKTHROUGH.md",
+      "sha256": "5726ab81155c69a6b4c3898133f18ee1bf8a37a005b99e33db92ac848d8585a4",
+      "bytes": 13670,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/evidence-contract.mjs",
+      "sha256": "f559cc8bf3688a0dc4bd1327892192103d1d3df74192fe198bf60f4f1e9eb8ed",
+      "bytes": 24740,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/evidence-release.json",
+      "sha256": "218ebea14a64fb23e7e52c7a512cdab662e0d5f05ec0c0c9fb08f9462bddee48",
+      "bytes": 1314,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/generation-provider.mjs",
+      "sha256": "e99f4e281bf6fefdfb03282be1a86691b2e327a87ceca264fe1b4f4c2c125237",
+      "bytes": 41130,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/installation-contract.mjs",
+      "sha256": "b4f61d6108aa605fddfcb7744264ccfc36450f2f3f5a6eb8474db095b4f5ee85",
+      "bytes": 32017,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/instance-contract.mjs",
+      "sha256": "e2cca006535a47ec260d718ff07a72f5361df1b75d179c2a23d753b8dc3a21f5",
+      "bytes": 80243,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/repository-provider.mjs",
+      "sha256": "3645e5b7c648b1ed3c848f610d6cbe9bd46e3cba764cf5825109ebe663d06c99",
+      "bytes": 5350,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/retrieval-engine.mjs",
+      "sha256": "816fd407aa742507b9a240989f84034d3beedab1b8ba61b09ecc6f8b0d179324",
+      "bytes": 37228,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/sync-protocol.mjs",
+      "sha256": "0a9ed7b09d7c7291f3e1c6ed15f51bea987b3218b79f66be295c9673913a1da5",
+      "bytes": 23584,
+      "mode": "0644"
+    },
+    {
+      "path": "core/product/uninstall-contract.mjs",
+      "sha256": "8fa2660498eb16dcfdb4f0d851f4a13233650cf8dc27ecc2178fa1fcb45390ef",
+      "bytes": 22020,
+      "mode": "0644"
+    },
+    {
+      "path": "core/scripts/atlas",
+      "sha256": "ca5e86bb95a5d69353c51b9eaf9262b870e73ed3d7749218a6d964645d654bff",
+      "bytes": 21246,
+      "mode": "0755"
+    },
+    {
+      "path": "core/scripts/atlas-agent-invocation-contract-test",
+      "sha256": "42b1221d73f961c74918ab3958a75691953617a5c0fa366b8b60d4564d6fb1a7",
+      "bytes": 12350,
+      "mode": "0755"
+    },
+    {
+      "path": "core/scripts/atlas-code-documentation-coverage-audit",
+      "sha256": "1fbe16a8d29cd936d7b2a8f3722b4cc3100159a4d1e0c519b6512b3ae2cda2fb",
+      "bytes": 20079,
+      "mode": "0755"
+    },
+    {
+      "path": "core/scripts/atlas-evidence-contract-test",
+      "sha256": "02ef57faa3c3f45ad5a1fcfd541b4c7dc924186b8397b5b042cfce2f5372e03c",
+      "bytes": 14912,
+      "mode": "0755"
+    },
+    {
+      "path": "core/scripts/atlas-generation-contract-test",
+      "sha256": "578453644ae0c8e889efca4f7ca5df0e2bf31ede4f5d3b100361f8913b7f7fb0",
+      "bytes": 32312,
+      "mode": "0755"
+    },
+    {
+      "path": "core/scripts/atlas-generation-mock",
+      "sha256": "e133c2d0197f7458b79d5975692faf976ea224edbc9048417721efc6f298712e",
+      "bytes": 4242,
+      "mode": "0755"
+    },
+    {
+      "path": "core/scripts/atlas-generation-openai",
+      "sha256": "04624d1cfcb2905a6c84979b05b009d9eab7fb62b0e0b0740b4e2a7c0a57215a",
+      "bytes": 10485,
+      "mode": "0755"
+    },
+    {
+      "path": "core/scripts/atlas-graph",
+      "sha256": "c4c0481227f747bd95d1f08ac258515a9ba09d62257b0d3e58fbd98897ef59fa",
+      "bytes": 9030,
+      "mode": "0755"
+    },
+    {
+      "path": "core/scripts/atlas-init",
+      "sha256": "9cfb9cefe9212fb9b3b0b79b854331212e64ab47a2f224e3866180ad1754df20",
+      "bytes": 10827,
+      "mode": "0755"
+    },
+    {
+      "path": "core/scripts/atlas-install",
+      "sha256": "18520e94cd16379f29e71c45cb1e8e347978cd682a6fee6406ca7301668672a0",
+      "bytes": 2634,
+      "mode": "0755"
+    },
+    {
+      "path": "core/scripts/atlas-install-contract-test",
+      "sha256": "b9d7a590eeafdbe8656410294a512c5ed6c415679bfec514923cd578039b54d6",
+      "bytes": 8225,
+      "mode": "0755"
+    },
+    {
+      "path": "core/scripts/atlas-instance-contract-test",
+      "sha256": "cdf433f257532ee3c50f619970c6d5549e3cc06e59da2ef417def1ffe8ba360b",
+      "bytes": 29392,
+      "mode": "0755"
+    },
+    {
+      "path": "core/scripts/atlas-provider",
+      "sha256": "9ba59fdab75a61d6078fdcdfc1d5b7c80f79653d49ceb4d37c2715a5b926905e",
+      "bytes": 6729,
+      "mode": "0755"
+    },
+    {
+      "path": "core/scripts/atlas-sync",
+      "sha256": "398dc8195a7ae7e772898d7b717bbc700a9e3dba1b855e25a7704736995a8842",
+      "bytes": 4403,
+      "mode": "0755"
+    },
+    {
+      "path": "core/scripts/atlas-sync-contract-test",
+      "sha256": "49c192f490aa7d1907df9d4ebb1d7f30b414b599eaeec6a382c58ee898aa9747",
+      "bytes": 7947,
+      "mode": "0755"
+    },
+    {
+      "path": "core/scripts/atlas-uninstall",
+      "sha256": "3df13ea80109293fafed8eb5821b65268e702a85fe9c0d17b1e181f4c5924e09",
+      "bytes": 4065,
+      "mode": "0755"
+    },
+    {
+      "path": "core/scripts/atlas-uninstall-contract-test",
+      "sha256": "c04a0cb3ad0131aebd7e8d2dbe629ad27115cfff3c75a25e44a7a7b37520596d",
+      "bytes": 13676,
+      "mode": "0755"
+    },
+    {
+      "path": "core/scripts/repository-provider-contract-test",
+      "sha256": "d1789b7f5e492118d582b003a411f00806d6732033ec85c109602d2d50b613fc",
+      "bytes": 5157,
+      "mode": "0755"
+    },
+    {
+      "path": "core/VERSION",
+      "sha256": "97a5d6e540a6120d09c39ddb667e0e8e2bac7fcc2ffef813b82e08fd60365bce",
+      "bytes": 6,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/architecture-atlas.js",
+      "sha256": "3e16c7b8da7253b87f094c74eece7e13410b9fdd72581278817c84c69fd5cce0",
+      "bytes": 17745,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/assets/fonts/Roboto-Italic-VariableFont_wdth,wght.ttf",
+      "sha256": "38e4f7659bb00be86aef1cb1325fce85534ba3f2e73c6ee47ab897ea758b1c2d",
+      "bytes": 530052,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/assets/fonts/Roboto-VariableFont_wdth,wght.ttf",
+      "sha256": "0fe599aba604c33d7ac9bb5f642dd15198bf7fbf037b0bbb78b4dcb89d340fc5",
+      "bytes": 487768,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/assets/fonts/RobotoFlex-VariableFont_GRAD,XOPQ,XTRA,YOPQ,YTAS,YTDE,YTFI,YTLC,YTUC,opsz,slnt,wdth,wght.ttf",
+      "sha256": "2bd17942bba38048b2f86e00cdd6fb2242035c0b2c843d5979bb24f13d5512ef",
+      "bytes": 1684624,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/CHANGELOG.md",
+      "sha256": "195979752b2e40560201c28f3177272e57a31e1d527fddf4af22807cbf145221",
+      "bytes": 1527,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/GRAPH_LAYOUT_MODEL.md",
+      "sha256": "81557d2785828e00724e024e4cd36e4a02485fb40c15905df20435255ae6f61f",
+      "bytes": 11333,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/GRAPH_LAYOUT_REFERENCES.md",
+      "sha256": "2a21e27ee7c139fd6e679214aece941e9faa9740541a8cf0fef8c52a76689770",
+      "bytes": 6811,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-active-chain.js",
+      "sha256": "14d4695bcbb5fb034a5e181e8673d1e2fc4fa2b7989bb09d4183c53a75eb800c",
+      "bytes": 3910,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-architecture-drilldown.js",
+      "sha256": "35275cc5c6ba852a1aa35e3778bdd3db328090c2a3bdbe7a5b280452aae7e569",
+      "bytes": 1641,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-container-routing.js",
+      "sha256": "2e19745c24d10b2e2356fb813b5b3dc780d47678979a25bd75643301b542fa3f",
+      "bytes": 8749,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-controller-utils.js",
+      "sha256": "ac5b762c1007a0d6f803b5fb2a757136a8b57ca723780da3d777a79d61a17659",
+      "bytes": 9755,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-geometry.js",
+      "sha256": "2fa36b355aa2897cca3a48c5f27352be456c1b309e70981af44d7c6e9e6dc7a6",
+      "bytes": 59763,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-grid.js",
+      "sha256": "949991c5c77ae9e3e1f7d1c5e5a5ec5a5668ed26ec3fd219d68c891c5b94a268",
+      "bytes": 9176,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-illustration.js",
+      "sha256": "68a2c82c012c0eee4571e9808483d7d93c657932038ef5bd28dc2adc8341b2bc",
+      "bytes": 90040,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-layout-containers.js",
+      "sha256": "cfcc421371a68c55c0c162e7a88819f8717baf3caed9809dd67eacf5f2520202",
+      "bytes": 26420,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-layout-flow.js",
+      "sha256": "ccf5136c28bb3850e5760d865699b344bffdcc920bd3f4702f6164217acb5e81",
+      "bytes": 26534,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-layout-grid.js",
+      "sha256": "bbeb31f31ef344ef92b1f7c640fda7df00c1a2ee2c5a10b0cbd78f4ba9f1b85d",
+      "bytes": 9257,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-layout-positioning.js",
+      "sha256": "1a309917a02399ee140ae8ec2c854ba3a9b6b5d2214a8e77a5ae2bada52100c8",
+      "bytes": 30285,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-layout.js",
+      "sha256": "275117b259f5f7947bf7d51c35982f194d2c9e75b2dd565c466c9c36b418bc40",
+      "bytes": 7481,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-model.js",
+      "sha256": "12aab420286396c49861ea44ed8521ec5d15f58ccbfbe3b2e135510c6f7126b2",
+      "bytes": 9886,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-navigation.js",
+      "sha256": "da2f5f5e45ff7faf79151f729b303577f1d9a4b26d813d212fd9e52c9d1d5860",
+      "bytes": 6718,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-precompute.js",
+      "sha256": "3751833c4d850faf73216fc6657007cc3917c17c5e643ff4003917fb5cd41738",
+      "bytes": 3960,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-projection-sources.js",
+      "sha256": "8e7dadced1269e356fcd4ea8ccb96aeabd1f945f67573b71b29433b313778bfe",
+      "bytes": 7380,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-render.js",
+      "sha256": "5ee6376f5ff41e0df96cb463964f1896832c059c31fe2177ff52150d9addfe65",
+      "bytes": 23790,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-router-panel.js",
+      "sha256": "203f5dc50b7ff1410ceb7543ca434df204eb54c8ccb02c8117f4c85def1a2410",
+      "bytes": 24680,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-router.js",
+      "sha256": "4f0b21611f6fc23c722a1879ac44670d30ae4b5eb1b349db830ca1cdc78d3c19",
+      "bytes": 60713,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-semantic.js",
+      "sha256": "78eb80ad1ff3ff63c33339fb95a7ae504c842b55bef5d5368a4cae7c18eadfe5",
+      "bytes": 15672,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-version.js",
+      "sha256": "e41bb55a00c72fa52f4beb5408aad10236cba5ed87562baed50622f8fd4eac9a",
+      "bytes": 317,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-view-model-assembly.js",
+      "sha256": "96885e3c42ef36dee452e4e96c6b2575152d27f7a6e45e740a1682d84217ef5a",
+      "bytes": 10640,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-view-model.js",
+      "sha256": "c1b2637c7120384c61ddfbfb9c577502ad868ecd315105189f75b96d413e5359",
+      "bytes": 17139,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/graph-view-state.js",
+      "sha256": "1fef5f332c0ac7da700c7f5de40b32e40cbb5a42ac76e363c778c09107feb9df",
+      "bytes": 2262,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/index.html",
+      "sha256": "0d7d776e6f8edb4341781169528b852ad91ed9bcf986f21d49f8c025b1dc1fe2",
+      "bytes": 1191,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/package-lock.json",
+      "sha256": "4511cd225898b1747c4f6ebf6b55bdc8d7ba19de66e18ab8fbd5b9366cf5d77d",
+      "bytes": 28025,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/package.json",
+      "sha256": "f8b4d880fcf20aa3575327e5ba437427d7474c049f15d194bbf651417f0d291c",
+      "bytes": 1506,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/scripts/architecture-atlas-audit.js",
+      "sha256": "38047c6221d98aafda5440de535aad25f229d6add4a8b322f64924a2bfa37d37",
+      "bytes": 11675,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/scripts/browser-dom-audit.js",
+      "sha256": "0a651242736171e5fbd56e0cbb5cf2da7d05c52b1ecf2767bd2bb182476eb692",
+      "bytes": 89280,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/scripts/layout-spacing-audit.js",
+      "sha256": "f6fe3d2fc54169b285a2a41523102c0edcba3642b6aa01039a52960dcc7c802f",
+      "bytes": 61110,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/scripts/model-invariant-audit.js",
+      "sha256": "650799294315b0c10f1ea5685ab712708325add683a36400bc70d8cdc46dcd44",
+      "bytes": 21561,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/scripts/node-move-performance-audit.js",
+      "sha256": "9595e40ee555d45e71af509afd83fa29209a03ba9c22d8a94f12c485713c0241",
+      "bytes": 14094,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/scripts/precompute-performance-audit.js",
+      "sha256": "83e61ea24518c7e166b64b4e6561985733e01799270cfcf468ab93826995a05b",
+      "bytes": 7351,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/scripts/semantic-center-audit.js",
+      "sha256": "f21cbbbbd0d96c9d5841f6e02cacb77182cd51103a61133b5243b2ae9febcba8",
+      "bytes": 4122,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/site.css",
+      "sha256": "77af21e21de2c230acf40ed60661e5209f0cf5050d874fc457de068f66a931d3",
+      "bytes": 34761,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/source-atlas.js",
+      "sha256": "66010207e08518ffdf00179255835b29bc6a3cd8f535535800c8755332b64c75",
+      "bytes": 49539,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/VERSION.md",
+      "sha256": "e815ed3a8099baac2ab2d5f764cd305a079554e0ac8f45cb139f24fc163f9622",
+      "bytes": 1149,
+      "mode": "0644"
+    },
+    {
+      "path": "graph/vite.config.js",
+      "sha256": "794cc20e7d4dee1010a81a109d0d8f0f30ad10f7d67e6c32c38bfd102fff5dd2",
+      "bytes": 977,
+      "mode": "0644"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "bytes": 11358,
+      "mode": "0644"
+    },
+    {
+      "path": "NOTICE",
+      "sha256": "76eaa1f6a90bfa714def12f243b4c99d540c96e5d9ba9e570147b2044aabdf1a",
+      "bytes": 59,
+      "mode": "0644"
+    },
+    {
+      "path": "README.md",
+      "sha256": "75f5dc1fc3b02c6498ed507a3528de1a7b6b226574594d230d9a3fc1924c024d",
+      "bytes": 8212,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/atlas-init",
+      "sha256": "1119e5dd4306c38a4031da93fbd6fe8b99bd3ceb1e0b613f413858ec3a62c1ed",
+      "bytes": 617,
+      "mode": "0755"
+    },
+    {
+      "path": "scripts/atlas-uninstall",
+      "sha256": "01c992af0b7a5686d5927dadd0d1d869cd823726b43b1e391c77047fd7f49aab",
+      "bytes": 377,
+      "mode": "0755"
+    },
+    {
+      "path": "SECURITY.md",
+      "sha256": "3c11a80f3cbf5ba3c31814681d6f699e0cf3e6ba6e559cd2bc2ab2a4be32c4ea",
+      "bytes": 705,
+      "mode": "0644"
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.md",
+      "sha256": "7520a6a0f90da0498fd24cd072bc3c065d353e0aa6e3ad891f6e9dd45ad8cb2f",
+      "bytes": 5505,
+      "mode": "0644"
+    }
+  ],
+  "reviews": {
+    "projectLicense": "approved",
+    "fontLicenseAttribution": "approved"
+  }
+}

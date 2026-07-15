@@ -1,0 +1,124 @@
+#!/usr/bin/env node
+
+/*
+ * Atlas Sync is the file-exchange command boundary. It appends immutable
+ * revision objects and reports deterministic reconciliation; Git remote,
+ * pull, merge, commit, and push operations remain consumer-owned.
+ */
+
+import fs from "node:fs";
+import path from "node:path";
+import {
+  ATLAS_SYNC_PROTOCOL_CONTRACT,
+  createAtlasRecordId,
+  createAtlasSyncRevision,
+  readAtlasSyncRevisions,
+  reconcileAtlasSyncRevisions,
+  writeAtlasSyncRevision,
+} from "../product/sync-protocol.mjs";
+
+/** Collects every repeated value supplied for one sync command option. */
+function values(name) {
+  const result = [];
+  for (let index = 0; index < process.argv.length; index += 1) {
+    if (process.argv[index] === name && process.argv[index + 1]) result.push(process.argv[index + 1]);
+    else if (process.argv[index].startsWith(`${name}=`)) result.push(process.argv[index].slice(name.length + 1));
+  }
+  return result;
+}
+
+/** Returns the first value for a singleton sync option or its explicit fallback. */
+function value(name, fallback = "") {
+  return values(name)[0] || fallback;
+}
+
+/** Checks whether an exact sync command flag is present in the invocation. */
+function enabled(name) {
+  return process.argv.includes(name);
+}
+
+/** Prints immutable exchange commands and the boundary that keeps Git consumer-owned. */
+function usage() {
+  console.log(`Usage:
+  atlas-sync id --repository ID --namespace NAME --logical-key KEY
+  atlas-sync append --exchange-root PATH --repository ID --namespace NAME --logical-key KEY --machine-id ID --sequence N [--parent REVISION] (--payload-file FILE | --delete) [--authored-at ISO]
+  atlas-sync reconcile --exchange-root PATH --repository ID
+  atlas-sync contract
+
+The exchange tree contains append-only revision files intended for Git. This
+command never invokes Git and never chooses a winner for divergent heads.`);
+}
+
+/** Validates that a required sync command option contains non-empty text. */
+function required(name) {
+  const result = value(name).trim();
+  if (!result) throw new Error(`Atlas sync requires ${name}`);
+  return result;
+}
+
+/** Prints one sync contract or result as stable human-readable JSON. */
+function print(valueToPrint) {
+  console.log(JSON.stringify(valueToPrint, null, 2));
+}
+
+if (enabled("--help") || enabled("-h") || !process.argv[2]) {
+  usage();
+  process.exit(enabled("--help") || enabled("-h") ? 0 : 1);
+}
+
+try {
+  const command = process.argv[2];
+  if (command === "contract") {
+    print(ATLAS_SYNC_PROTOCOL_CONTRACT);
+    process.exit(0);
+  }
+  if (command === "id") {
+    console.log(createAtlasRecordId({
+      repositoryId: required("--repository"),
+      namespace: required("--namespace"),
+      logicalKey: required("--logical-key"),
+    }));
+    process.exit(0);
+  }
+  if (command === "append") {
+    const payloadFile = value("--payload-file");
+    const deleting = enabled("--delete");
+    if (Boolean(payloadFile) === deleting) {
+      throw new Error("Atlas sync append requires exactly one of --payload-file or --delete");
+    }
+    const revision = createAtlasSyncRevision({
+      repositoryId: required("--repository"),
+      namespace: required("--namespace"),
+      logicalKey: required("--logical-key"),
+      machineId: required("--machine-id"),
+      sequence: required("--sequence"),
+      parents: values("--parent"),
+      operation: deleting ? "delete" : "upsert",
+      ...(deleting ? {} : { value: JSON.parse(fs.readFileSync(path.resolve(payloadFile), "utf8")) }),
+      authoredAt: value("--authored-at"),
+    });
+    const result = writeAtlasSyncRevision({
+      exchangeRoot: path.resolve(required("--exchange-root")),
+      revision,
+    });
+    print({
+      schema: "multihead-atlas.sync_append_result.v1",
+      status: result.status,
+      relativePath: result.relativePath,
+      revision,
+    });
+    process.exit(0);
+  }
+  if (command === "reconcile") {
+    const repositoryId = required("--repository");
+    const exchangeRoot = path.resolve(required("--exchange-root"));
+    const revisions = readAtlasSyncRevisions({ exchangeRoot, repositoryId });
+    const result = reconcileAtlasSyncRevisions({ repositoryId, revisions });
+    print(result);
+    process.exit(result.status === "pass" ? 0 : 2);
+  }
+  throw new Error(`Unknown Atlas sync command: ${command}`);
+} catch (error) {
+  console.error(error?.stack || error?.message || String(error));
+  process.exit(1);
+}

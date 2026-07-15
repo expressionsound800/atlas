@@ -1,0 +1,109 @@
+#!/usr/bin/env node
+
+/*
+ * Atlas Generation Mock is the deterministic executable reference for the
+ * generic command-adapter protocol. Contract suites use it to exercise real
+ * stdin/stdout process boundaries without network access or model judgment.
+ * It is not presented as an LLM and does not replace provider-specific tests.
+ */
+
+import {
+  ATLAS_GENERATION_RESULT_SCHEMA,
+  ATLAS_REPOSITORY_SYSTEM_MODEL_SCHEMA,
+  canonicalAtlasGenerationJson,
+  validateAtlasGenerationRequest,
+  validateAtlasGenerationResult,
+} from "../product/generation-provider.mjs";
+
+/** Reads the complete generation request from stdin before producing one result. */
+async function readRequest() {
+  let text = "";
+  for await (const chunk of process.stdin) text += chunk;
+  return validateAtlasGenerationRequest(JSON.parse(text));
+}
+
+/** Builds the deterministic semantic-model fixture used by command-mode learning contracts. */
+function systemModelFor(request) {
+  if (request.task.kind !== "repository-system-model") return null;
+  const evidence = request.sources.map(({ path, digest }) => ({ path, digest }));
+  // artifact.sources mirrors the complete orientation packet, while one model
+  // claim remains within the validator's sixteen-citation evidence bound.
+  const claimEvidence = evidence.slice(0, 16);
+  return {
+    schema: ATLAS_REPOSITORY_SYSTEM_MODEL_SCHEMA,
+    repository: {
+      purpose: "The fixture exercises the bounded Atlas repository-learning contract.",
+      nonGoals: ["It does not claim consumer-specific architecture beyond admitted fixture sources."],
+      evidence: claimEvidence,
+      confidence: 0.9,
+    },
+    components: [{
+      id: "repository-coordination",
+      label: "Repository Coordination",
+      responsibility: "Coordinates the fixture entry, documented behavior, and admitted implementation evidence.",
+      viewpoint: "source-backed repository responsibility",
+      region: "Repository System",
+      facets: ["coordination", "learning-contract"],
+      answers: ["how the fixture sources form one repository system"],
+      evidence: [evidence[0]],
+      confidence: 0.85,
+    }],
+    relationships: [],
+    flows: [],
+    unknowns: [{
+      id: "runtime-behavior-unknown",
+      description: "The bounded fixture sources do not establish production runtime behavior.",
+      evidence: [evidence[0]],
+      confidence: 0.8,
+    }],
+  };
+}
+
+/** Collapses source whitespace into a bounded deterministic fixture summary. */
+function sourcePreview(request) {
+  const text = request.sources.map((source) => source.content).join(" ").replace(/\s+/gu, " ").trim();
+  return text.slice(0, 360) || "The admitted source contains no visible text.";
+}
+
+/** Builds the strict room fields required by every adapter result schema. */
+function roomFor(request) {
+  if (request.task.kind !== "room-specification") {
+    return { id: "", label: "", viewpoint: "", facets: [], answers: [] };
+  }
+  return {
+    id: `generated-room-${request.requestDigest.slice(0, 12)}`,
+    label: "Generated Source Room",
+    viewpoint: `source-derived view over ${request.sources.map((source) => source.path).join(", ")}`,
+    facets: ["generated", "source-derived"],
+    answers: ["what the admitted source records"],
+  };
+}
+
+/** Builds one deterministic protocol result whose provenance exactly mirrors the request. */
+function buildResult(request) {
+  const kindLabel = request.task.kind.replace(/-/gu, " ");
+  const systemModel = systemModelFor(request);
+  return validateAtlasGenerationResult({
+    request,
+    result: {
+      schema: ATLAS_GENERATION_RESULT_SCHEMA,
+      requestDigest: request.requestDigest,
+      provider: {
+        id: process.env.ATLAS_GENERATION_PROVIDER_ID || "atlas-mock",
+        mode: "command",
+        model: "deterministic-mock-v1",
+      },
+      artifact: {
+        kind: request.task.kind,
+        title: `Deterministic ${kindLabel}`,
+        summary: `${kindLabel}: ${sourcePreview(request)}`,
+        room: roomFor(request),
+        sources: request.sources.map(({ path, digest }) => ({ path, digest })),
+        ...(systemModel ? { systemModel } : {}),
+      },
+    },
+  });
+}
+
+const request = await readRequest();
+process.stdout.write(canonicalAtlasGenerationJson(buildResult(request)));

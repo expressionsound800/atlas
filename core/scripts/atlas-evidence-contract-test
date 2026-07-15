@@ -1,0 +1,325 @@
+#!/usr/bin/env node
+
+/*
+ * Evidence Contract Test exercises the source-neutral packet against an
+ * arbitrary repository. It covers deterministic strong/weak/stale/missing/
+ * conflicting states and proves excluded source bytes, paths, and machine
+ * roots cannot cross the evidence boundary.
+ */
+
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import {
+  ATLAS_EVIDENCE_CONTRACT,
+  ATLAS_EVIDENCE_RELEASE,
+  ATLAS_EVIDENCE_SCHEMA,
+  buildAtlasEvidencePacket,
+  readAtlasEvidenceRelease,
+} from "../product/evidence-contract.mjs";
+import {
+  defaultAtlasInstanceConfig,
+  validateAtlasInstanceConfig,
+} from "../product/instance-contract.mjs";
+import { createAtlasRepositoryProvider } from "../product/repository-provider.mjs";
+
+/** Reads an Evidence-fixture option from separated or equals-prefixed CLI syntax. */
+function argValue(name, fallback = "") {
+  const exact = process.argv.indexOf(name);
+  if (exact >= 0) return process.argv[exact + 1] || fallback;
+  const prefixed = process.argv.find((arg) => arg.startsWith(`${name}=`));
+  return prefixed ? prefixed.slice(name.length + 1) : fallback;
+}
+
+/** Checks one Evidence state, privacy, or compatibility invariant with a focused failure. */
+function check(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+/** Verifies that tampered Evidence release material rejects with the expected diagnostic. */
+function rejects(operation, expected) {
+  try {
+    operation();
+  } catch (error) {
+    check(String(error?.message || error).includes(expected), `unexpected rejection: ${error}`);
+    return;
+  }
+  throw new Error(`expected rejection containing: ${expected}`);
+}
+
+/** Computes source fixture digests used to distinguish current and stale Evidence rows. */
+function digest(value) {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+const workRootValue = argValue("--work-root");
+check(workRootValue && path.isAbsolute(workRootValue), "--work-root must be an absolute registered technical-space path");
+const workRoot = path.resolve(workRootValue);
+const repositoryRoot = path.join(workRoot, "arbitrary-repository");
+const indexPath = path.join(workRoot, "state", "evidence.sqlite");
+// The sentinel proves excluded-source redaction without resembling a credential
+// to the public distribution's generic secret scanners.
+const privateSentinel = "EXCLUDED PRIVATE EVIDENCE SENTINEL";
+
+fs.rmSync(workRoot, { recursive: true, force: true });
+fs.mkdirSync(path.join(repositoryRoot, "docs"), { recursive: true });
+fs.mkdirSync(path.join(repositoryRoot, "private"), { recursive: true });
+
+const releaseFixture = path.join(workRoot, "evidence-release");
+fs.mkdirSync(path.join(releaseFixture, "docs"), { recursive: true });
+// The fixture preserves the production-relative specification path because the
+// release record validates location and content as one installed Core contract.
+fs.copyFileSync(
+  path.resolve(import.meta.dirname, "..", "product", "docs", "EVIDENCE_V2.md"),
+  path.join(releaseFixture, "docs", "EVIDENCE_V2.md"),
+);
+fs.copyFileSync(
+  path.resolve(import.meta.dirname, "..", "product", "evidence-release.json"),
+  path.join(releaseFixture, "evidence-release.json"),
+);
+const frozenRelease = readAtlasEvidenceRelease({ productRoot: releaseFixture });
+check(frozenRelease.status === "frozen", "Evidence v2 release is not frozen");
+check(frozenRelease.protocolSchema === ATLAS_EVIDENCE_SCHEMA, "Evidence release protocol schema changed");
+check(frozenRelease.contractSchema === ATLAS_EVIDENCE_CONTRACT.schema, "Evidence release contract schema changed");
+check(frozenRelease.compatibility.atlasCore.introducedIn === "0.3.0", "Evidence v2 Atlas Core introduction boundary changed");
+check(frozenRelease.gitBoundary.independent === false, "Evidence unexpectedly acquired an independent Git boundary");
+fs.appendFileSync(path.join(releaseFixture, "docs", "EVIDENCE_V2.md"), "\nTamper probe.\n");
+rejects(
+  () => readAtlasEvidenceRelease({ productRoot: releaseFixture }),
+  "specification digest does not match",
+);
+
+const sources = {
+  "docs/ARCHITECTURE.md": [
+    "# Architecture Contract",
+    "",
+    "Repository source authority stays in the consumer repository.",
+    "Atlas evidence returns a bounded locator for agent verification.",
+    `Portable output must redact the machine root ${repositoryRoot}.`,
+  ].join("\n"),
+  "docs/FRESHNESS.md": [
+    "# Freshness Contract",
+    "",
+    "A stale expected digest must remain visible as stale evidence.",
+    "Content comparison protects the agent from outdated navigation summaries.",
+  ].join("\n"),
+  "docs/CONFLICT.md": [
+    "# Conflict Contract",
+    "",
+    "Competing durable records remain conflicting until reviewed reconciliation.",
+  ].join("\n"),
+  "private/SECRET.md": `# Private\n\n${privateSentinel}\n${repositoryRoot}\n`,
+};
+for (const [relative, text] of Object.entries(sources)) {
+  fs.writeFileSync(path.join(repositoryRoot, relative), `${text}\n`, "utf8");
+}
+
+const base = defaultAtlasInstanceConfig({ repositoryId: "evidence-fixture" });
+const instance = validateAtlasInstanceConfig({
+  ...base,
+  source: {
+    ...base.source,
+    include: ["docs", "private"],
+    exclude: [...base.source.exclude, "private"],
+  },
+});
+const generatedAt = "2026-07-14T00:00:00.000Z";
+
+/** Builds one Evidence fixture room with explicit source, kind, state, and digest metadata. */
+function catalogRoom(options) {
+  const expectedDigest = options.expectedDigest || digest(options.summary);
+  return {
+    id: options.id,
+    label: options.label,
+    owner: "evidence-fixture",
+    viewpoint: options.summary,
+    summary: options.summary,
+    generatedSummary: options.summary,
+    summaryStatus: options.sourcePath ? "source-derived" : "provider-authored",
+    summarySource: "evidence-contract-fixture",
+    summaryUpdatedAt: generatedAt,
+    summaryDigest: expectedDigest,
+    freshnessStatus: "source-digest-current",
+    freshnessDigest: expectedDigest,
+    sourceRepos: ["evidence-fixture"],
+    facets: [options.id, "evidence-contract"],
+    answers: [options.summary],
+    metadata: {
+      sourcePath: options.sourcePath || "",
+      evidence: {
+        kind: options.kind || (options.sourcePath ? "durable-document" : "repository-aggregate"),
+        ...(options.state ? { state: options.state } : {}),
+        ...(options.sourcePath ? {
+          sourceDigest: expectedDigest,
+          sourceDigestAlgorithm: "sha256-utf8",
+        } : {}),
+      },
+    },
+  };
+}
+
+const architectureDigest = digest(`${sources["docs/ARCHITECTURE.md"]}\n`);
+const freshnessDigest = digest(`${sources["docs/FRESHNESS.md"]}\n`);
+const conflictDigest = digest(`${sources["docs/CONFLICT.md"]}\n`);
+const excludedDigest = digest(`${sources["private/SECRET.md"]}\n`);
+const catalog = {
+  schema: "fixture.evidence_catalog.v1",
+  authority: "evidence-fixture",
+  generatedAt,
+  rooms: [
+    catalogRoom({ id: "evidence-fixture", label: "Evidence Fixture", summary: "Repository evidence fixture authority." }),
+    catalogRoom({
+      id: "architecture-evidence",
+      label: "Architecture Evidence",
+      summary: "Source authority and bounded locator contract for agent verification.",
+      sourcePath: "docs/ARCHITECTURE.md",
+      expectedDigest: architectureDigest,
+    }),
+    catalogRoom({
+      id: "stale-evidence",
+      label: "Stale Evidence",
+      summary: "Expected digest stale comparison protects freshness.",
+      sourcePath: "docs/FRESHNESS.md",
+      expectedDigest: "0".repeat(64),
+    }),
+    catalogRoom({
+      id: "missing-evidence",
+      label: "Missing Evidence",
+      summary: "A configured source pointer may be missing.",
+      sourcePath: "docs/MISSING.md",
+      expectedDigest: "1".repeat(64),
+    }),
+    catalogRoom({
+      id: "conflicting-evidence",
+      label: "Conflicting Evidence",
+      summary: "Competing durable records remain conflicting until reviewed reconciliation.",
+      sourcePath: "docs/CONFLICT.md",
+      expectedDigest: conflictDigest,
+      state: "conflicting",
+      kind: "durable-decision",
+    }),
+    catalogRoom({
+      id: "private-evidence",
+      label: `Private ${privateSentinel}`,
+      summary: `Excluded source ${privateSentinel} at private/SECRET.md and ${repositoryRoot}.`,
+      sourcePath: "private/SECRET.md",
+      expectedDigest: excludedDigest,
+    }),
+  ],
+  portals: [],
+  metadata: { sourceModel: "evidence-contract-fixture-adapter" },
+};
+
+const provider = createAtlasRepositoryProvider({
+  repositoryId: instance.repositoryId,
+  catalog,
+  indexPath,
+  generationProvider: "evidence-contract-fixture-adapter",
+});
+const index = await provider.rebuild();
+
+/** Builds an Evidence packet from a real provider search with an optional result transform. */
+function packet(query, limit = 1, transformSearch = (search) => search) {
+  const search = transformSearch(provider.search({ query, limit }));
+  return buildAtlasEvidencePacket({
+    root: repositoryRoot,
+    instance,
+    catalog,
+    providerDescription: provider.describe(),
+    index,
+    search,
+  });
+}
+
+const strong = packet("architecture-evidence source authority locator");
+check(strong.schema === ATLAS_EVIDENCE_SCHEMA && strong.status === "pass", "Evidence v2 schema or execution status changed");
+check(strong.contract.release.status === "frozen", "Evidence packet does not carry the frozen release state");
+check(strong.contract.release.specificationDigest === ATLAS_EVIDENCE_RELEASE.specification.sha256, "Evidence packet specification digest changed");
+check(strong.contract.release.releaseRecordDigest === ATLAS_EVIDENCE_RELEASE.recordDigest, "Evidence packet release-record digest changed");
+check(strong.state === "strong" && strong.evidence[0]?.state === "strong", "current source evidence was not strong");
+check(strong.evidence[0]?.kind === "durable-document", "declared durable evidence kind was not preserved");
+check(strong.evidence[0]?.source.path === "docs/ARCHITECTURE.md", "strong evidence source path changed");
+check(strong.evidence[0]?.source.digest === architectureDigest, "strong evidence source digest changed");
+check(strong.evidence[0]?.freshness.state === "current" && strong.evidence[0]?.freshness.basis === "content-digest-comparison", "content freshness was not verified");
+check(strong.evidence[0]?.match.reasons.includes("exact-room-id"), "exact room match reason is missing");
+check(strong.evidence[0]?.match.reasons.includes("lexical-token-match"), "lexical match reason is missing");
+check(strong.evidence[0]?.locator?.path === "docs/ARCHITECTURE.md", "source locator path changed");
+check(strong.evidence[0].locator.endLine - strong.evidence[0].locator.startLine + 1 <= 5, "excerpt locator exceeds five lines");
+check(strong.evidence[0]?.excerpt?.text.length <= 1000, "excerpt exceeds the character bound");
+check(strong.metrics.sourceHintCoverage === 1 && strong.metrics.topResultHasSource, "source-hint coverage changed");
+check(!JSON.stringify(strong).includes(repositoryRoot), "strong packet leaked the machine-local repository root");
+
+const stale = packet("stale-evidence expected digest");
+check(stale.state === "stale" && stale.evidence[0]?.freshness.state === "stale", "stale source digest was not explicit");
+const missing = packet("missing-evidence configured source");
+check(missing.state === "missing" && missing.evidence[0]?.source.status === "missing", "missing configured source was not explicit");
+check(missing.evidence[0]?.source.path === "docs/MISSING.md" && missing.evidence[0]?.excerpt === null, "missing source locator contract changed");
+const conflicting = packet("conflicting-evidence durable records");
+check(conflicting.state === "conflicting" && conflicting.evidence[0]?.state === "conflicting", "declared conflict was not preserved");
+
+const privatePacket = packet("private-evidence");
+const privateText = JSON.stringify(privatePacket);
+check(privatePacket.state === "missing" && privatePacket.evidence[0]?.source.status === "not-authorized", "excluded source was not rejected");
+check(privatePacket.evidence[0]?.source.path === "" && privatePacket.evidence[0]?.excerpt === null, "excluded source returned a locator or excerpt");
+for (const forbidden of [privateSentinel, excludedDigest, "private/SECRET.md", repositoryRoot, indexPath]) {
+  check(!privateText.includes(forbidden), `excluded or local evidence leaked: ${forbidden}`);
+}
+
+const weak = packet("qzv-unindexed-nonsense-token", 6, (search) => ({
+  ...search,
+  results: search.results.filter((result) => ["architecture-evidence", "stale-evidence", "conflicting-evidence"].includes(result.id))
+    .filter((result) => result.matchedTokens === 0)
+    .slice(0, 1),
+}));
+check(weak.state === "weak" && weak.evidence[0]?.state === "weak", "vector-only evidence was not weak");
+const empty = packet("qzv-empty-result", 1, (search) => ({ ...search, results: [] }));
+check(empty.state === "missing" && empty.metrics.results === 0, "empty evidence was not explicitly missing");
+
+const repeated = packet("architecture-evidence source authority locator");
+check(JSON.stringify(repeated) === JSON.stringify(strong), "identical evidence inputs were not deterministic");
+
+const usefulnessCorpus = [
+  ["source authority bounded locator", "architecture-evidence"],
+  ["expected digest stale comparison freshness", "stale-evidence"],
+  ["competing durable records reviewed reconciliation", "conflicting-evidence"],
+];
+const usefulness = usefulnessCorpus.map(([query, expectedRoomId]) => {
+  const result = packet(query, 1);
+  return {
+    query,
+    expectedRoomId,
+    actualRoomId: result.evidence[0]?.roomId || "",
+    sourceHint: Boolean(result.evidence[0]?.source.path),
+  };
+});
+const usefulTopResults = usefulness.filter((row) => row.actualRoomId === row.expectedRoomId).length;
+const sourceHints = usefulness.filter((row) => row.sourceHint).length;
+check(usefulTopResults === usefulness.length, "fixed evidence usefulness corpus ranking changed");
+check(sourceHints === usefulness.length, "fixed evidence usefulness corpus lost source hints");
+
+console.log(JSON.stringify({
+  schema: "multihead-atlas.evidence_contract_test.v1",
+  status: "pass",
+  evidenceSchema: ATLAS_EVIDENCE_SCHEMA,
+  states: [strong.state, weak.state, stale.state, missing.state, conflicting.state],
+  privacy: {
+    excludedSourceBytes: 0,
+    excludedSourcePaths: 0,
+    absoluteLocalPaths: 0,
+  },
+  determinism: "pass",
+  release: {
+    status: frozenRelease.status,
+    specificationDigest: frozenRelease.specification.sha256,
+    recordDigest: frozenRelease.recordDigest,
+    atlasCoreIntroducedIn: frozenRelease.compatibility.atlasCore.introducedIn,
+    independentGitBoundary: frozenRelease.gitBoundary.independent,
+    digestTamperRejections: 1,
+  },
+  usefulness: {
+    corpus: usefulness.length,
+    usefulTopResults,
+    topResultUsefulness: usefulTopResults / usefulness.length,
+    sourceHintCoverage: sourceHints / usefulness.length,
+  },
+}, null, 2));

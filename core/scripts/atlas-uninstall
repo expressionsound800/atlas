@@ -1,0 +1,110 @@
+#!/usr/bin/env node
+
+/*
+ * Atlas Uninstall is the interactive and automation-safe command boundary for
+ * removing one repository-local Atlas Instance. It delegates ownership and
+ * sync safeguards to uninstall-contract.mjs, asks for confirmation only after
+ * a complete plan exists, and remains callable from a distribution checkout
+ * when the installed runtime is incomplete.
+ */
+
+import readline from "node:readline/promises";
+import path from "node:path";
+import {
+  ATLAS_UNINSTALL_RESULT_SCHEMA,
+  executeAtlasUninstall,
+  planAtlasUninstall,
+} from "../product/uninstall-contract.mjs";
+
+/** Reads one uninstaller option from separated or equals-prefixed argument syntax. */
+function argValue(name, fallback = "") {
+  const exact = process.argv.indexOf(name);
+  if (exact >= 0) return process.argv[exact + 1] || fallback;
+  const prefixed = process.argv.find((arg) => arg.startsWith(`${name}=`));
+  return prefixed ? prefixed.slice(name.length + 1) : fallback;
+}
+
+/** Checks whether the caller supplied one exact uninstaller behavior flag. */
+function enabled(name) {
+  return process.argv.includes(name);
+}
+
+/** Prints the safe default, preview, automation, and sync-discard command forms. */
+function usage() {
+  console.log(`Usage:
+  .atlas/bin/atlas uninstall [--dry-run] [--yes] [--delete-sync-exchange] [--json]
+  scripts/atlas-uninstall --repo PATH [--dry-run] [--yes] [--delete-sync-exchange] [--json]
+
+Uninstall removes Atlas-owned runtime, generated state, control files, and
+managed AGENTS/.gitignore regions. Consumer memory, source roots, adapters,
+Git data, credentials, and external sync exchanges are never deleted.`);
+}
+
+/** Emits one stable JSON payload or a concise plan/result summary for a person. */
+function printPayload(payload) {
+  if (enabled("--json")) {
+    console.log(JSON.stringify(payload, null, 2));
+    return;
+  }
+  console.log(`Atlas uninstall ${payload.status}: ${payload.installationId || payload.repositoryRoot}`);
+  for (const blocker of payload.blockers || []) console.log(`Blocked: ${blocker.detail}`);
+  for (const preserved of payload.preserved || []) console.log(`Preserved: ${preserved.path} (${preserved.reason})`);
+  if (payload.removalPaths?.length) console.log(`Remove: ${payload.removalPaths.join(", ")}`);
+  if (payload.removed?.length) console.log(`Removed: ${payload.removed.join(", ")}`);
+}
+
+/** Requests one terminal confirmation tied to the planned repository identity. */
+async function confirmed(plan) {
+  if (enabled("--yes")) return true;
+  if (!process.stdin.isTTY || !process.stdout.isTTY || enabled("--json")) return false;
+  const terminal = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await terminal.question(`Remove Atlas from ${plan.repositoryRoot}? [y/N] `);
+    return /^(?:y|yes)$/iu.test(answer.trim());
+  } finally {
+    terminal.close();
+  }
+}
+
+if (enabled("--help") || enabled("-h")) {
+  usage();
+  process.exit(0);
+}
+
+try {
+  const root = path.resolve(argValue("--repo", argValue("--root", process.cwd())));
+  const plan = planAtlasUninstall({
+    root,
+    deleteSyncExchange: enabled("--delete-sync-exchange"),
+  });
+  if (plan.status === "blocked") {
+    printPayload(plan);
+    process.exit(2);
+  }
+  if (plan.status === "already-absent") {
+    printPayload({
+      schema: ATLAS_UNINSTALL_RESULT_SCHEMA,
+      status: "already-absent",
+      repositoryRoot: plan.repositoryRoot,
+      installationId: plan.installationId,
+      removed: [],
+      preserved: plan.preserved,
+    });
+    process.exit(0);
+  }
+  if (enabled("--dry-run")) {
+    printPayload(plan);
+    process.exit(0);
+  }
+  if (!enabled("--yes") && !enabled("--json") && process.stdin.isTTY && process.stdout.isTTY) printPayload(plan);
+  if (!(await confirmed(plan))) {
+    printPayload({ ...plan, status: "confirmation-required" });
+    process.exit(2);
+  }
+  const result = executeAtlasUninstall(plan);
+  printPayload(result);
+  process.exit(0);
+} catch (error) {
+  console.error(error?.stack || error?.message || String(error));
+  process.exit(1);
+}

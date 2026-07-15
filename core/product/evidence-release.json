@@ -1,0 +1,37 @@
+{
+  "schema": "multihead-atlas.evidence_protocol_release.v1",
+  "protocolSchema": "multihead-atlas.instance_evidence.v2",
+  "contractSchema": "multihead-atlas.instance_evidence_contract.v2",
+  "contractVersion": 2,
+  "status": "frozen",
+  "specification": {
+    "path": "docs/EVIDENCE_V2.md",
+    "digestAlgorithm": "sha256",
+    "sha256": "adbbb7cee969d92de610b0cdb5182e2074ae8b7d037578915a318761b86ba833"
+  },
+  "compatibility": {
+    "atlasCore": {
+      "introducedIn": "0.3.0",
+      "implementationBoundary": "atlas-core"
+    },
+    "atlasGraph": {
+      "required": false,
+      "compatibleCheckpoint": "0.6.1"
+    },
+    "agentInvocation": {
+      "contract": "multihead-atlas.agent_invocation.v1",
+      "evidenceSchema": "multihead-atlas.instance_evidence.v2"
+    }
+  },
+  "gitBoundary": {
+    "independent": false,
+    "authority": "atlas-core-release",
+    "reason": "Evidence is implemented, installed, and rolled back with Atlas Core and has no independent delivery surface.",
+    "revisitTriggers": [
+      "an implementation consumes Evidence without Atlas Core",
+      "Evidence is distributed as a separate package or SDK",
+      "Evidence and Atlas Core require independent release or rollback cadences",
+      "multiple agent integrations negotiate Evidence compatibility directly"
+    ]
+  }
+}

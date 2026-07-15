@@ -1,0 +1,67 @@
+#!/usr/bin/env node
+
+/*
+ * Atlas Install is the command boundary for placing a pinned Atlas/Graph
+ * runtime inside one installation root. Source checkout paths are machine
+ * inputs; they never enter the consumer manifest or lock.
+ */
+
+import path from "node:path";
+import {
+  installAtlasRuntime,
+  installGraphDependencies,
+  verifyAtlasInstallation,
+} from "../product/installation-contract.mjs";
+
+/** Reads one installer option from separated or equals-prefixed argument syntax. */
+function argValue(name, fallback = "") {
+  const exact = process.argv.indexOf(name);
+  if (exact >= 0) return process.argv[exact + 1] || fallback;
+  const prefixed = process.argv.find((arg) => arg.startsWith(`${name}=`));
+  return prefixed ? prefixed.slice(name.length + 1) : fallback;
+}
+
+/** Checks whether an exact installer mode flag is present in the invocation. */
+function enabled(name) {
+  return process.argv.includes(name);
+}
+
+/** Prints install and verification modes with their consumer-owned path boundary. */
+function usage() {
+  console.log(`Usage:
+  scripts/atlas-install --root PATH --manifest PATH --atlas-source PATH --graph-source PATH [--install-graph-dependencies] [--allow-source-changes] [--json]
+  scripts/atlas-install --verify --root PATH --manifest PATH [--json]
+
+The manifest and lock are consumer-owned. Runtime and generated state remain
+under the manifest's repository-local, meta-repository-local, or global paths.`);
+}
+
+if (enabled("--help") || enabled("-h")) {
+  usage();
+  process.exit(0);
+}
+
+try {
+  const root = path.resolve(argValue("--root", process.cwd()));
+  const manifestPath = path.resolve(argValue("--manifest", path.join(root, ".atlas", "atlas.install.json")));
+  let result;
+  if (enabled("--verify")) {
+    result = verifyAtlasInstallation({ root, manifestPath });
+  } else {
+    const installed = installAtlasRuntime({
+      root,
+      manifestPath,
+      atlasSource: argValue("--atlas-source", process.env.MULTIHEAD_ATLAS_SOURCE || ""),
+      graphSource: argValue("--graph-source", process.env.MULTIHEAD_MEMORY_GRAPH_SOURCE || ""),
+      allowSourceChanges: enabled("--allow-source-changes"),
+    });
+    if (enabled("--install-graph-dependencies")) installGraphDependencies(installed.runtimeRoot);
+    result = verifyAtlasInstallation({ root, manifestPath });
+  }
+  if (enabled("--json")) console.log(JSON.stringify(result, null, 2));
+  else console.log(`Atlas installation ${result.status}: ${result.installationId} (${result.scope})`);
+  process.exit(result.status === "pass" ? 0 : 1);
+} catch (error) {
+  console.error(error?.stack || error?.message || String(error));
+  process.exit(1);
+}

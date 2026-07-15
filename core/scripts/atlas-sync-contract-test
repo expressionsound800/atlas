@@ -1,0 +1,137 @@
+#!/usr/bin/env node
+
+/*
+ * Sync Contract Test proves identity stability, append-only Git layout,
+ * causal fast-forward, explicit divergence, merge resolution, equivalent
+ * heads, deletion conflicts, missing provenance, and machine collisions.
+ */
+
+import fs from "node:fs";
+import path from "node:path";
+import {
+  ATLAS_SYNC_PROTOCOL_CONTRACT,
+  canonicalAtlasSyncJson,
+  createAtlasRecordId,
+  createAtlasSyncBundle,
+  createAtlasSyncRevision,
+  readAtlasSyncRevisions,
+  reconcileAtlasSyncRevisions,
+  writeAtlasSyncRevision,
+} from "../product/sync-protocol.mjs";
+
+/** Reads a sync-fixture option from separated or equals-prefixed CLI syntax. */
+function argValue(name, fallback = "") {
+  const exact = process.argv.indexOf(name);
+  if (exact >= 0) return process.argv[exact + 1] || fallback;
+  const prefixed = process.argv.find((arg) => arg.startsWith(`${name}=`));
+  return prefixed ? prefixed.slice(name.length + 1) : fallback;
+}
+
+/** Checks one causal identity, exchange, conflict, or reconciliation invariant. */
+function check(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+/** Creates a repository-scoped upsert revision with explicit causal parents and provenance. */
+function revision(logicalKey, machineId, sequence, value, parents = [], authoredAt = "2026-07-13T08:00:00.000Z") {
+  return createAtlasSyncRevision({
+    repositoryId: "fixture-repository",
+    namespace: "memory-record",
+    logicalKey,
+    machineId,
+    sequence,
+    parents,
+    operation: "upsert",
+    value,
+    authoredAt,
+  });
+}
+
+const workRootArg = argValue("--work-root");
+check(workRootArg && path.isAbsolute(workRootArg), "--work-root must be an absolute registered technical-space path");
+const workRoot = path.resolve(workRootArg);
+fs.rmSync(workRoot, { recursive: true, force: true });
+fs.mkdirSync(workRoot, { recursive: true });
+
+const recordIdA = createAtlasRecordId({ repositoryId: "fixture-repository", namespace: "memory-record", logicalKey: "memory/DECISIONS/example.md" });
+const recordIdB = createAtlasRecordId({ repositoryId: "fixture-repository", namespace: "memory-record", logicalKey: "memory/DECISIONS/example.md" });
+check(recordIdA === recordIdB, "stable record id changed across machines");
+
+const base = revision("memory/DECISIONS/example.md", "machine-alpha", 1, { status: "draft", claim: "base" });
+const alpha = revision("memory/DECISIONS/example.md", "machine-alpha", 2, { status: "active", claim: "alpha" }, [base.revisionId], "2026-07-13T09:00:00.000Z");
+const beta = revision("memory/DECISIONS/example.md", "machine-beta", 1, { status: "active", claim: "beta" }, [base.revisionId], "2026-07-13T10:00:00.000Z");
+
+const firstWrite = writeAtlasSyncRevision({ exchangeRoot: workRoot, revision: base });
+const repeatedWrite = writeAtlasSyncRevision({ exchangeRoot: workRoot, revision: base });
+writeAtlasSyncRevision({ exchangeRoot: workRoot, revision: alpha });
+writeAtlasSyncRevision({ exchangeRoot: workRoot, revision: beta });
+check(firstWrite.status === "written" && repeatedWrite.status === "existing", "immutable append is not idempotent");
+check(firstWrite.relativePath.startsWith(path.join("atlas-sync", "v1", "repositories", "fixture-repository", "records")), "revision path is not Git-friendly and repository-scoped");
+check(!firstWrite.relativePath.includes("machine-alpha"), "revision path leaks machine identity");
+check(readAtlasSyncRevisions({ exchangeRoot: workRoot, repositoryId: "fixture-repository" }).length === 3, "exchange reader did not load immutable revisions");
+
+const fastForward = reconcileAtlasSyncRevisions({ repositoryId: "fixture-repository", revisions: [alpha, base] });
+check(fastForward.status === "pass" && fastForward.records[0].resolution.revisionId === alpha.revisionId, "causal fast-forward did not resolve to its descendant");
+
+const divergent = reconcileAtlasSyncRevisions({ repositoryId: "fixture-repository", revisions: [base, alpha, beta] });
+check(divergent.status === "conflict", "concurrent edits did not remain explicit");
+check(divergent.conflicts.some((item) => item.kind === "divergent-active-claims"), "divergent active claim conflict is missing");
+const reversedDivergent = reconcileAtlasSyncRevisions({ repositoryId: "fixture-repository", revisions: [beta, alpha, base] });
+check(canonicalAtlasSyncJson(divergent) === canonicalAtlasSyncJson(reversedDivergent), "reconciliation depends on input order");
+
+const merged = revision("memory/DECISIONS/example.md", "machine-alpha", 3, { status: "active", claim: "merged" }, [beta.revisionId, alpha.revisionId], "2026-07-13T11:00:00.000Z");
+const resolved = reconcileAtlasSyncRevisions({ repositoryId: "fixture-repository", revisions: [base, beta, merged, alpha] });
+check(resolved.status === "pass" && resolved.records[0].resolution.revisionId === merged.revisionId, "explicit merge revision did not resolve every causal head");
+
+const equivalentBase = revision("memory/STEMS/equivalent.md", "machine-gamma", 1, { claim: "base" });
+const equivalentA = revision("memory/STEMS/equivalent.md", "machine-gamma", 2, { claim: "same" }, [equivalentBase.revisionId]);
+const equivalentB = revision("memory/STEMS/equivalent.md", "machine-delta", 1, { claim: "same" }, [equivalentBase.revisionId]);
+const equivalent = reconcileAtlasSyncRevisions({ repositoryId: "fixture-repository", revisions: [equivalentBase, equivalentA, equivalentB] });
+check(equivalent.status === "pass" && equivalent.records[0].status === "equivalent-heads", "semantic duplicate heads were not reported without a false conflict");
+
+const deleteBase = revision("memory/STEMS/delete.md", "machine-epsilon", 1, { claim: "base" });
+const updateHead = revision("memory/STEMS/delete.md", "machine-epsilon", 2, { claim: "updated" }, [deleteBase.revisionId]);
+const deleteHead = createAtlasSyncRevision({
+  repositoryId: "fixture-repository",
+  namespace: "memory-record",
+  logicalKey: "memory/STEMS/delete.md",
+  machineId: "machine-zeta",
+  sequence: 1,
+  parents: [deleteBase.revisionId],
+  operation: "delete",
+  authoredAt: "2026-07-13T12:00:00.000Z",
+});
+const deleteUpdate = reconcileAtlasSyncRevisions({ repositoryId: "fixture-repository", revisions: [deleteBase, updateHead, deleteHead] });
+check(deleteUpdate.conflicts.some((item) => item.kind === "delete-update"), "concurrent delete and update did not conflict");
+
+const missingParent = revision("memory/STEMS/missing.md", "machine-eta", 1, { claim: "orphan" }, [`atlas-revision-${"f".repeat(64)}`]);
+const incomplete = reconcileAtlasSyncRevisions({ repositoryId: "fixture-repository", revisions: [missingParent] });
+check(incomplete.conflicts.some((item) => item.kind === "missing-parent"), "missing causal provenance was not reported");
+
+const collisionA = revision("memory/STEMS/collision-a.md", "machine-theta", 1, { claim: "a" });
+const collisionB = revision("memory/STEMS/collision-b.md", "machine-theta", 1, { claim: "b" });
+const collision = reconcileAtlasSyncRevisions({ repositoryId: "fixture-repository", revisions: [collisionA, collisionB] });
+check(collision.conflicts.some((item) => item.kind === "machine-sequence-collision"), "machine sequence collision was not reported");
+
+const bundleA = createAtlasSyncBundle({ repositoryId: "fixture-repository", revisions: [beta, base, alpha] });
+const bundleB = createAtlasSyncBundle({ repositoryId: "fixture-repository", revisions: [alpha, beta, base] });
+check(bundleA.bundleId === bundleB.bundleId, "bundle identity depends on revision input order");
+
+console.log(JSON.stringify({
+  schema: "multihead-atlas.sync_contract_test.v1",
+  status: "pass",
+  contract: ATLAS_SYNC_PROTOCOL_CONTRACT,
+  metrics: {
+    stableRecordIds: 1,
+    immutableRevisionFiles: 3,
+    fastForward: 1,
+    divergentConflicts: 1,
+    mergeResolutions: 1,
+    equivalentHeadSets: 1,
+    deleteUpdateConflicts: 1,
+    missingParentConflicts: 1,
+    machineSequenceConflicts: 1,
+    deterministicBundles: 1,
+  },
+  exchangeRoot: workRoot,
+}, null, 2));

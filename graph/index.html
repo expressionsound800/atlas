@@ -1,0 +1,32 @@
+<!--
+  The standalone Graph document defines the accessible application shell,
+  toolbar, graph canvas, overlays, stable visual identity, and module entrypoint
+  rendered by the lens.
+-->
+<!doctype html>
+<html lang="en" data-theme="paper-lime">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Atlas</title>
+  <script>
+    // Safari cannot render the bundled Roboto Flex face reliably. Mark the
+    // document before CSS loads so it uses the bundled static Roboto family
+    // without a late font swap or any theme-selection side effects.
+    (() => {
+      const userAgent = navigator.userAgent;
+      const isSafari = /Safari/i.test(userAgent)
+        && !/(Chrome|Chromium|CriOS|Edg|OPR)/i.test(userAgent);
+      if (isSafari) document.documentElement.dataset.browser = "safari";
+    })();
+  </script>
+  <link rel="stylesheet" href="./site.css">
+</head>
+<body class="memory-graph-app">
+  <main class="page-shell">
+    <div id="graph-illustration-root" class="workspace-graph-root memory-graph-root" aria-label="Memory graph"></div>
+  </main>
+
+  <script type="module" src="./graph-illustration.js"></script>
+</body>
+</html>

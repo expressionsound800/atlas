@@ -1,0 +1,253 @@
+#!/usr/bin/env node
+
+/*
+ * Atlas OpenAI Generation Adapter implements the generic command protocol
+ * through the OpenAI Responses API. Atlas Core passes a bounded request over
+ * stdin; this adapter reads credentials only from the environment, requests a
+ * strict JSON result, and emits provider-neutral Atlas JSON on stdout. It does
+ * not read repository files or persist API responses independently.
+ */
+
+import {
+  ATLAS_GENERATION_REMOTE_APPROVAL,
+  ATLAS_GENERATION_RESULT_SCHEMA,
+  ATLAS_REPOSITORY_SYSTEM_MODEL_SCHEMA,
+  canonicalAtlasGenerationJson,
+  validateAtlasGenerationRequest,
+  validateAtlasGenerationResult,
+} from "../product/generation-provider.mjs";
+
+const API_URL = "https://api.openai.com/v1/responses";
+
+/** Reads and validates the complete source-bounded request supplied over stdin. */
+async function readRequest() {
+  let text = "";
+  for await (const chunk of process.stdin) text += chunk;
+  return validateAtlasGenerationRequest(JSON.parse(text));
+}
+
+/** Recursively collects Responses API output_text segments without depending on item ordering. */
+function collectOutputText(value, chunks = []) {
+  if (Array.isArray(value)) {
+    for (const child of value) collectOutputText(child, chunks);
+  } else if (value && typeof value === "object") {
+    if (value.type === "output_text" && typeof value.text === "string") chunks.push(value.text);
+    for (const child of Object.values(value)) collectOutputText(child, chunks);
+  }
+  return chunks;
+}
+
+/** Builds the strict provider-neutral result schema requested from OpenAI. */
+function resultJsonSchema(request, model) {
+  const evidenceSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["path", "digest"],
+    properties: { path: { type: "string" }, digest: { type: "string" } },
+  };
+  const systemModelSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["schema", "repository", "components", "relationships", "flows", "unknowns"],
+    properties: {
+      schema: { type: "string", const: ATLAS_REPOSITORY_SYSTEM_MODEL_SCHEMA },
+      repository: {
+        type: "object",
+        additionalProperties: false,
+        required: ["purpose", "nonGoals", "evidence", "confidence"],
+        properties: {
+          purpose: { type: "string" },
+          nonGoals: { type: "array", items: { type: "string" } },
+          evidence: { type: "array", minItems: 1, maxItems: 16, items: evidenceSchema },
+          confidence: { type: "number", minimum: 0, maximum: 1 },
+        },
+      },
+      components: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["id", "label", "responsibility", "viewpoint", "region", "facets", "answers", "evidence", "confidence"],
+          properties: {
+            id: { type: "string" }, label: { type: "string" }, responsibility: { type: "string" },
+            viewpoint: { type: "string" }, region: { type: "string" },
+            facets: { type: "array", items: { type: "string" } },
+            answers: { type: "array", items: { type: "string" } },
+            evidence: { type: "array", minItems: 1, maxItems: 16, items: evidenceSchema },
+            confidence: { type: "number", minimum: 0, maximum: 1 },
+          },
+        },
+      },
+      relationships: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["id", "from", "to", "kind", "label", "description", "evidence", "confidence"],
+          properties: {
+            id: { type: "string" }, from: { type: "string" }, to: { type: "string" }, kind: { type: "string" },
+            label: { type: "string" }, description: { type: "string" },
+            evidence: { type: "array", minItems: 1, maxItems: 16, items: evidenceSchema },
+            confidence: { type: "number", minimum: 0, maximum: 1 },
+          },
+        },
+      },
+      flows: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["id", "label", "description", "steps", "evidence", "confidence"],
+          properties: {
+            id: { type: "string" }, label: { type: "string" }, description: { type: "string" },
+            steps: {
+              type: "array",
+              items: {
+                type: "object", additionalProperties: false, required: ["componentId", "action"],
+                properties: { componentId: { type: "string" }, action: { type: "string" } },
+              },
+            },
+            evidence: { type: "array", minItems: 1, maxItems: 16, items: evidenceSchema },
+            confidence: { type: "number", minimum: 0, maximum: 1 },
+          },
+        },
+      },
+      unknowns: {
+        type: "array",
+        items: {
+          type: "object", additionalProperties: false, required: ["id", "description", "evidence", "confidence"],
+          properties: {
+            id: { type: "string" }, description: { type: "string" },
+            evidence: { type: "array", minItems: 1, maxItems: 16, items: evidenceSchema },
+            confidence: { type: "number", minimum: 0, maximum: 1 },
+          },
+        },
+      },
+    },
+  };
+  const systemModelTask = request.task.kind === "repository-system-model";
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["schema", "requestDigest", "provider", "artifact"],
+    properties: {
+      schema: { type: "string", const: ATLAS_GENERATION_RESULT_SCHEMA },
+      requestDigest: { type: "string", const: request.requestDigest },
+      provider: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "mode", "model"],
+        properties: {
+          id: { type: "string", const: process.env.ATLAS_GENERATION_PROVIDER_ID || "openai" },
+          mode: { type: "string", const: "command" },
+          model: { type: "string", const: model },
+        },
+      },
+      artifact: {
+        type: "object",
+        additionalProperties: false,
+        required: ["kind", "title", "summary", "room", "sources", ...(systemModelTask ? ["systemModel"] : [])],
+        properties: {
+          kind: { type: "string", const: request.task.kind },
+          title: { type: "string" },
+          summary: { type: "string" },
+          room: {
+            type: "object",
+            additionalProperties: false,
+            required: ["id", "label", "viewpoint", "facets", "answers"],
+            properties: {
+              id: { type: "string" },
+              label: { type: "string" },
+              viewpoint: { type: "string" },
+              facets: { type: "array", items: { type: "string" } },
+              answers: { type: "array", items: { type: "string" } },
+            },
+          },
+          sources: {
+            type: "array",
+            minItems: request.sources.length,
+            maxItems: request.sources.length,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["path", "digest"],
+              properties: { path: { type: "string" }, digest: { type: "string" } },
+            },
+          },
+          ...(systemModelTask ? { systemModel: systemModelSchema } : {}),
+        },
+      },
+    },
+  };
+}
+
+/** Builds the bounded instruction that maps one request kind to the common artifact schema. */
+function instructionsFor(request) {
+  const roomRule = request.task.kind === "room-specification"
+    ? "Fill every room field with a stable lowercase id, concise label, viewpoint, facets, and answerable questions."
+    : "Return empty strings and empty arrays in the room object because this task does not create a room.";
+  const modelRule = request.task.kind === "repository-system-model"
+    ? "Build a responsibility-level system model. Do not convert filenames, folders, classes, or functions directly into rooms; cite exact supplied paths and digests for every claim, relationship, flow, and unknown."
+    : "";
+  return [
+    "Create one Atlas generation artifact from only the supplied request sources.",
+    "Do not add facts that are absent from those sources.",
+    "Keep the summary concise, specific, and suitable for repository retrieval.",
+    "Copy every source path and digest exactly into artifact.sources.",
+    roomRule,
+    modelRule,
+    request.task.instruction ? `Consumer instruction: ${request.task.instruction}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+/** Calls the Responses API once and parses the strict JSON output text. */
+async function callOpenAI(request) {
+  if (process.env[ATLAS_GENERATION_REMOTE_APPROVAL.environment] !== ATLAS_GENERATION_REMOTE_APPROVAL.value) {
+    throw new Error("Atlas OpenAI adapter requires the explicit remote-context approval supplied by atlas generation run --allow-remote");
+  }
+  const apiKey = String(process.env.OPENAI_API_KEY || "").trim();
+  if (!apiKey) throw new Error("Atlas OpenAI adapter requires OPENAI_API_KEY");
+  const model = String(process.env.ATLAS_OPENAI_MODEL || process.env.OPENAI_MODEL || "").trim();
+  if (!model) {
+    throw new Error("Atlas OpenAI adapter requires ATLAS_OPENAI_MODEL or OPENAI_MODEL; Atlas does not select a hosted model implicitly");
+  }
+  const response = await fetch(API_URL, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      instructions: instructionsFor(request),
+      input: canonicalAtlasGenerationJson(request),
+      store: false,
+      text: {
+        format: {
+          type: "json_schema",
+          name: "atlas_generation_result",
+          strict: true,
+          schema: resultJsonSchema(request, model),
+        },
+      },
+    }),
+  });
+  const body = await response.json();
+  if (!response.ok) {
+    const message = body?.error?.message || `HTTP ${response.status}`;
+    throw new Error(`OpenAI Responses API request failed: ${message}`);
+  }
+  const output = collectOutputText(body).join("\n").trim();
+  if (!output) throw new Error("OpenAI Responses API returned no output_text JSON");
+  const result = JSON.parse(output);
+  result.provider.model = result.provider.model || model;
+  return validateAtlasGenerationResult({
+    request,
+    result,
+    expectedMode: "command",
+    expectedProviderId: process.env.ATLAS_GENERATION_PROVIDER_ID || "openai",
+  });
+}
+
+const request = await readRequest();
+process.stdout.write(canonicalAtlasGenerationJson(await callOpenAI(request)));

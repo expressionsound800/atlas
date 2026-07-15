@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# This wrapper fixes both product-source inputs and their provenance authority
+# to the reviewed distribution tree. Downloaded archives therefore install
+# from recorded component revisions and file digests without requiring Git.
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+DISTRIBUTION_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+
+exec node "$DISTRIBUTION_ROOT/core/scripts/atlas-init" \
+  --atlas-source "$DISTRIBUTION_ROOT/core" \
+  --graph-source "$DISTRIBUTION_ROOT/graph" \
+  --distribution-provenance "$DISTRIBUTION_ROOT/ATLAS_COMPONENTS.json" \
+  "$@"

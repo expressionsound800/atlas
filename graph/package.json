@@ -1,0 +1,38 @@
+{
+  "name": "atlas-graph",
+  "version": "0.7.0",
+  "private": true,
+  "type": "module",
+  "description": "Atlas Graph visual lens for Atlas provider projections.",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 8910",
+    "preview": "vite preview --host 127.0.0.1 --port 8911",
+    "check": "vite build",
+    "audit:atlas": "node scripts/architecture-atlas-audit.js",
+    "audit:model": "node scripts/model-invariant-audit.js",
+    "audit:precompute": "node scripts/precompute-performance-audit.js",
+    "audit:move": "node scripts/node-move-performance-audit.js",
+    "audit:semantic": "node scripts/semantic-center-audit.js",
+    "audit:layout": "node scripts/layout-spacing-audit.js",
+    "audit:layout:live": "node scripts/layout-spacing-audit.js --live",
+    "audit:browser": "node scripts/browser-dom-audit.js"
+  },
+  "exports": {
+    "./architecture-atlas": "./architecture-atlas.js",
+    "./graph-model": "./graph-model.js",
+    "./graph-view-model": "./graph-view-model.js",
+    "./graph-precompute": "./graph-precompute.js",
+    "./graph-semantic": "./graph-semantic.js",
+    "./graph-geometry": "./graph-geometry.js",
+    "./graph-grid": "./graph-grid.js",
+    "./graph-layout": "./graph-layout.js",
+    "./graph-navigation": "./graph-navigation.js",
+    "./graph-render": "./graph-render.js",
+    "./graph-router": "./graph-router.js",
+    "./graph-view-state": "./graph-view-state.js",
+    "./source-atlas": "./source-atlas.js"
+  },
+  "devDependencies": {
+    "vite": "^8.0.16"
+  }
+}

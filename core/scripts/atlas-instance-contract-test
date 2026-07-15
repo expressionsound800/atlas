@@ -1,0 +1,532 @@
+#!/usr/bin/env node
+
+/*
+ * Instance Contract Test creates two arbitrary consumer repositories in a
+ * caller-supplied technical space. It proves bootstrap, installed-only
+ * operation after an absolute-path move, explicit code-extension admission,
+ * visible Markdown title derivation, bounded source-inventory Graph overview,
+ * JavaScript/Python/Markdown reference derivation, non-navigable source evidence,
+ * rejection of a lookalike server occupying the requested Graph port, and
+ * causal sync through the repository-local command surface without using
+ * private consumer memory as fixture input.
+ */
+
+import childProcess from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import {
+  buildAtlasInstanceCatalog,
+  buildAtlasInstanceGraphProjection,
+  buildAtlasInstanceRoute,
+  createAtlasInstanceProvider,
+  scanAtlasInstanceSources,
+  selectAtlasRepositoryOrientationSources,
+} from "../product/instance-contract.mjs";
+
+/** Reads an instance-fixture option from separated or equals-prefixed CLI syntax. */
+function argValue(name, fallback = "") {
+  const exact = process.argv.indexOf(name);
+  if (exact >= 0) return process.argv[exact + 1] || fallback;
+  const prefixed = process.argv.find((arg) => arg.startsWith(`${name}=`));
+  return prefixed ? prefixed.slice(name.length + 1) : fallback;
+}
+
+/** Checks one installed-instance isolation, retrieval, Graph, or sync invariant. */
+function check(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+/** Runs one installed command and accepts only the fixture's declared process statuses. */
+function run(command, args, options = {}) {
+  const result = childProcess.spawnSync(command, args, {
+    cwd: options.cwd,
+    env: { ...process.env, ...(options.env || {}) },
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const allowed = options.allowedStatus || [0];
+  if (!allowed.includes(result.status)) {
+    throw new Error(`Command failed (${result.status}): ${command} ${args.join(" ")}\n${result.stdout}\n${result.stderr}`);
+  }
+  return result;
+}
+
+/** Runs an installed instance command and parses its required JSON stdout payload. */
+function runJson(command, args, options = {}) {
+  const result = run(command, args, options);
+  try {
+    return { result, payload: JSON.parse(result.stdout) };
+  } catch (error) {
+    throw new Error(`Command did not return JSON: ${command} ${args.join(" ")}\n${result.stdout}\n${error}`);
+  }
+}
+
+/** Checks whether one local fixture port has begun accepting TCP connections. */
+function portListening(port) {
+  return childProcess.spawnSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"], {
+    encoding: "utf8",
+    stdio: ["ignore", "ignore", "ignore"],
+  }).status === 0;
+}
+
+/** Waits for the lookalike server so Graph launch observes the intended collision. */
+function waitForPort(port) {
+  const signal = new Int32Array(new SharedArrayBuffer(4));
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    if (portListening(port)) return;
+    Atomics.wait(signal, 0, 0, 25);
+  }
+  throw new Error(`Graph port decoy did not listen on ${port}`);
+}
+
+/** Writes one self-contained consumer repository with durable memory and architecture sources. */
+function writeFixture(root, label) {
+  fs.mkdirSync(path.join(root, "memory", "DECISIONS"), { recursive: true });
+  fs.mkdirSync(path.join(root, "docs"), { recursive: true });
+  fs.mkdirSync(path.join(root, "lib"), { recursive: true });
+  fs.mkdirSync(path.join(root, "src", "kalibra", "metrics"), { recursive: true });
+  fs.mkdirSync(path.join(root, "src", "kalibra", "commands"), { recursive: true });
+  fs.mkdirSync(path.join(root, "src", "kalibra", "adapters"), { recursive: true });
+  fs.mkdirSync(path.join(root, "tests"), { recursive: true });
+  fs.mkdirSync(path.join(root, "vendor"), { recursive: true });
+  fs.writeFileSync(path.join(root, "README.md"), `# ${label}\n\nArbitrary repository Atlas fixture.\n`);
+  fs.writeFileSync(path.join(root, "memory", "CURRENT.md"), `# Current Memory\n\n${label} owns repository-local continuity.\n`);
+  fs.writeFileSync(path.join(root, "memory", "DECISIONS", "architecture.md"), "# Decision: Local Authority\n\nThe repository owns its memory.\n");
+  fs.writeFileSync(path.join(root, "docs", "ARCHITECTURE.md"), [
+    "#### <sup>:closed_book: [Fixture](../README.md) → Architecture Guide</sup>",
+    "",
+    "Atlas is installed locally and remains path neutral.",
+    "See [Setup](./SETUP.md), [Reference](./REFERENCE.md), and [Operations](./OPERATIONS.md).",
+    "",
+    "<!--",
+    "# foo",
+    "-->",
+    "",
+    "```md",
+    "# fenced placeholder",
+    "```",
+    "",
+  ].join("\n"));
+  fs.writeFileSync(path.join(root, "docs", "SETUP.md"), [
+    "# Setup",
+    "",
+    "Install the repository-local runtime, then read the [reference](./REFERENCE.md).",
+    "",
+  ].join("\n"));
+  fs.writeFileSync(path.join(root, "docs", "REFERENCE.md"), [
+    "# Reference",
+    "",
+    "The [architecture guide](./ARCHITECTURE.md) owns the structural overview.",
+    "",
+  ].join("\n"));
+  fs.writeFileSync(path.join(root, "docs", "OPERATIONS.md"), [
+    "# Operations",
+    "",
+    "Operational guidance returns to the [repository entry](../README.md).",
+    "",
+  ].join("\n"));
+  fs.writeFileSync(path.join(root, "lib", "SketchManager.js"), [
+    "/* SketchManager coordinates canvas viewport resizing for the fixture. */",
+    'import resizeCanvasViewport from "./viewport";',
+    "export default function SketchManager() {",
+    "  return resizeCanvasViewport();",
+    "};",
+    "",
+  ].join("\n"));
+  fs.writeFileSync(path.join(root, "lib", "viewport.js"), [
+    "/* viewport owns the fixture's deterministic resize operation. */",
+    "export default function resizeCanvasViewport() {",
+    "  return 'canvas viewport resizing';",
+    "}",
+    "",
+  ].join("\n"));
+  fs.writeFileSync(path.join(root, "src", "kalibra", "__init__.py"), "from .engine import compare_traces\n");
+  fs.writeFileSync(path.join(root, "src", "kalibra", "engine.py"), [
+    "from .metrics.duration import DurationMetric",
+    "",
+    "def compare_traces(left, right):",
+    "    return DurationMetric().compare(left, right)",
+    "",
+  ].join("\n"));
+  fs.writeFileSync(path.join(root, "src", "kalibra", "metrics", "duration.py"), [
+    "class DurationMetric:",
+    "    def compare(self, left, right):",
+    "        return left - right",
+    "",
+  ].join("\n"));
+  fs.writeFileSync(path.join(root, "src", "kalibra", "model.py"), "class Trace:\n    pass\n");
+  fs.writeFileSync(path.join(root, "src", "kalibra", "loader.py"), "from .model import Trace\n\ndef load_trace():\n    return Trace()\n");
+  fs.writeFileSync(path.join(root, "src", "kalibra", "commands", "compare.py"), "from ..engine import compare_traces\nfrom ..loader import load_trace\n");
+  fs.writeFileSync(path.join(root, "src", "kalibra", "adapters", "json_format.py"), "from ..model import Trace\n\ndef decode():\n    return Trace()\n");
+  fs.writeFileSync(path.join(root, "src", "kalibra", "ambiguous_consumer.py"), "import shared\n");
+  fs.writeFileSync(path.join(root, "src", "kalibra", "shared.py"), "SOURCE = 'package'\n");
+  fs.writeFileSync(path.join(root, "vendor", "shared.py"), "SOURCE = 'vendor'\n");
+  for (let index = 0; index < 7; index += 1) {
+    fs.writeFileSync(path.join(root, "tests", `test_flow_${index}.py`), "from kalibra.engine import compare_traces\n");
+  }
+}
+
+const workRootValue = argValue("--work-root");
+const graphSourceValue = argValue("--graph-source");
+check(workRootValue && path.isAbsolute(workRootValue), "--work-root must be an absolute registered technical-space path");
+check(graphSourceValue, "--graph-source is required");
+const workRoot = path.resolve(workRootValue);
+const atlasSource = path.resolve(argValue("--atlas-source", path.resolve(import.meta.dirname, "..")));
+const graphSource = path.resolve(graphSourceValue);
+const originalA = path.join(workRoot, "machine-a-original");
+const movedA = path.join(workRoot, "machine-a-moved");
+const machineB = path.join(workRoot, "machine-b");
+const exchangeRoot = path.join(workRoot, "exchange");
+
+fs.rmSync(workRoot, { recursive: true, force: true });
+writeFixture(originalA, "Fixture Repository A");
+writeFixture(machineB, "Fixture Repository B");
+
+/** Runs Atlas initialization for one machine fixture with optional Graph dependencies. */
+const init = (root, withGraph) => runJson(process.execPath, [
+  path.join(atlasSource, "scripts", "atlas-init"),
+  "--repo", root,
+  "--repository-id", "fixture-repository",
+  "--include", "README.md",
+  "--include", "memory",
+  "--include", "docs",
+  "--include", "lib",
+  "--include", "src",
+  "--include", "tests",
+  "--include", "vendor",
+  "--extension", ".js",
+  "--extension", ".py",
+  "--atlas-source", atlasSource,
+  "--graph-source", graphSource,
+  "--allow-source-changes",
+  ...(withGraph ? ["--with-graph"] : []),
+  "--json",
+], { cwd: atlasSource });
+
+const initializedA = init(originalA, true).payload;
+const initializedB = init(machineB, false).payload;
+check(initializedA.status === "pass" && initializedB.status === "pass", "arbitrary repository initialization failed");
+check(fs.existsSync(path.join(originalA, ".atlas", "bin", "atlas")), "repository-local Atlas command shim is missing");
+const configuredInstancePath = path.join(originalA, ".atlas", "atlas.instance.json");
+const configuredInstanceText = fs.readFileSync(configuredInstancePath, "utf8");
+const configuredInstance = JSON.parse(configuredInstanceText);
+check(configuredInstance.source.extensions.includes(".js") && configuredInstance.source.extensions.includes(".py") && configuredInstance.source.extensions.includes(".md"), "initializer did not add the requested code extensions to the default text policy");
+const rejectedPolicyMutation = run(process.execPath, [
+  path.join(atlasSource, "scripts", "atlas-init"),
+  "--repo", originalA,
+  "--extension", ".ts",
+  "--atlas-source", atlasSource,
+  "--graph-source", graphSource,
+  "--allow-source-changes",
+], { cwd: atlasSource, allowedStatus: [1] });
+check(rejectedPolicyMutation.stderr.includes("only when creating a new instance"), "existing instance source-policy mutation did not fail with the ownership reason");
+check(fs.readFileSync(configuredInstancePath, "utf8") === configuredInstanceText, "rejected source-policy mutation changed the tracked instance");
+
+const commandA = path.join(originalA, ".atlas", "bin", "atlas");
+const verifyA = runJson(commandA, ["verify"], { cwd: originalA }).payload;
+const indexA = runJson(commandA, ["index"], { cwd: originalA }).payload;
+const searchA = runJson(commandA, ["search", "repository local continuity", "--limit", "2"], { cwd: originalA }).payload;
+const evidenceA = runJson(commandA, ["evidence", "architecture path neutral", "--limit", "2"], { cwd: originalA }).payload;
+const codeEvidenceA = runJson(commandA, ["evidence", "canvas viewport resizing", "--limit", "2"], { cwd: originalA }).payload;
+check(verifyA.status === "pass", "installed Atlas instance verification failed");
+check(indexA.status === "pass" && indexA.index.metrics.rooms === 27, "default repository adapter did not index root plus twenty-six source-evidence records");
+check(searchA.status === "pass" && searchA.search.results.length > 0, "installed Atlas search failed");
+check(evidenceA.schema === "multihead-atlas.instance_evidence.v2" && evidenceA.status === "pass", "installed Atlas did not return Evidence v2");
+const architectureEvidence = evidenceA.evidence.find((row) => row.source.path === "docs/ARCHITECTURE.md");
+check(architectureEvidence?.state === "strong", "installed Atlas evidence did not strongly cite repository source");
+check(architectureEvidence.label === "Architecture Guide", "visible Markdown breadcrumb did not outrank commented or fenced placeholder headings");
+check(architectureEvidence.source.digest && architectureEvidence.freshness.state === "current", "installed Atlas evidence omitted source digest or freshness");
+check(architectureEvidence.locator?.startLine > 0 && architectureEvidence.excerpt?.text, "installed Atlas evidence omitted its bounded source locator");
+check(architectureEvidence.match.reasons.length && Number.isFinite(architectureEvidence.match.score.normalized), "installed Atlas evidence omitted match reasons or score parts");
+check(!JSON.stringify(evidenceA).includes(originalA), "installed Atlas evidence leaked an absolute repository root");
+const codeEvidence = codeEvidenceA.evidence.find((row) => row.source.path === "lib/SketchManager.js");
+check(codeEvidence?.state === "strong" && codeEvidence.label === "SketchManager", "requested JavaScript extension did not produce a filename-labelled source-evidence record");
+
+const genericCatalog = buildAtlasInstanceCatalog({ root: originalA });
+const sketchRoom = genericCatalog.rooms.find((room) => room.metadata?.sourcePath === "lib/SketchManager.js");
+const viewportRoom = genericCatalog.rooms.find((room) => room.metadata?.sourcePath === "lib/viewport.js");
+const architectureRoom = genericCatalog.rooms.find((room) => room.metadata?.sourcePath === "docs/ARCHITECTURE.md");
+const setupRoom = genericCatalog.rooms.find((room) => room.metadata?.sourcePath === "docs/SETUP.md");
+const pythonEngineRoom = genericCatalog.rooms.find((room) => room.metadata?.sourcePath === "src/kalibra/engine.py");
+const pythonDurationRoom = genericCatalog.rooms.find((room) => room.metadata?.sourcePath === "src/kalibra/metrics/duration.py");
+const ambiguousConsumerRoom = genericCatalog.rooms.find((room) => room.metadata?.sourcePath === "src/kalibra/ambiguous_consumer.py");
+const ambiguousTargetIds = new Set(genericCatalog.rooms
+  .filter((room) => room.metadata?.sourcePath === "src/kalibra/shared.py" || room.metadata?.sourcePath === "vendor/shared.py")
+  .map((room) => room.id));
+const importPortal = genericCatalog.portals.find((portal) =>
+  portal.kind === "source_import"
+    && portal.fromRoomId === sketchRoom?.id
+    && portal.toRoomId === viewportRoom?.id
+);
+check(importPortal, "default repository adapter did not derive the local JavaScript import");
+check(genericCatalog.portals.some((portal) =>
+  portal.kind === "source_import"
+    && portal.fromRoomId === pythonEngineRoom?.id
+    && portal.toRoomId === pythonDurationRoom?.id
+), "default repository adapter did not derive the relative Python import");
+check(!genericCatalog.portals.some((portal) =>
+  portal.kind === "source_import"
+    && portal.fromRoomId === ambiguousConsumerRoom?.id
+    && ambiguousTargetIds.has(portal.toRoomId)
+), "default repository adapter guessed between ambiguous absolute Python import targets");
+check(genericCatalog.portals.some((portal) =>
+  portal.kind === "source_link"
+    && portal.fromRoomId === architectureRoom?.id
+    && portal.toRoomId === setupRoom?.id
+), "default repository adapter did not retain the local Markdown relationship");
+check(genericCatalog.metadata.sourceGroups >= 3, "default repository adapter did not derive structural source groups");
+check(genericCatalog.metadata.sourceRelationships >= 1, "default repository adapter did not report source relationships");
+const orientation = selectAtlasRepositoryOrientationSources({ scan: scanAtlasInstanceSources({ root: originalA }) });
+check(orientation.metrics.selectedTests <= 4, "orientation packet let representative tests displace production sources");
+check(orientation.metrics.selectedProductionModules >= 7, "orientation packet did not reserve enough connected production modules");
+check(orientation.metrics.selectedProductionGroups >= 4, "orientation packet let one dense package displace path-diverse production evidence");
+for (const expectedRoleSource of [
+  "src/kalibra/engine.py",
+  "src/kalibra/loader.py",
+  "src/kalibra/commands/compare.py",
+  "src/kalibra/adapters/json_format.py",
+]) {
+  check(orientation.sourcePaths.includes(expectedRoleSource), `orientation packet omitted production role evidence: ${expectedRoleSource}`);
+}
+check(genericCatalog.metadata.repositorySystemModelStatus === "missing", "fresh structural catalog did not report the missing learned model");
+check(genericCatalog.rooms.find((room) => room.id === genericCatalog.authority)?.label.includes("Source Inventory"), "unlearned Graph authority did not visibly identify the source-inventory fallback");
+check(!genericCatalog.portals.some((portal) => portal.kind === "opens_room"), "source evidence was incorrectly exposed through opens_room portals");
+check(genericCatalog.rooms.filter((room) => room.metadata?.sourcePath).every((room) =>
+  room.metadata.entryKind === "source-evidence"
+    && room.metadata.navigationKind === "none"
+    && room.metadata.roomGraphStatus === "unavailable"
+    && room.metadata.roomGraphFreshnessStatus === ""
+), "raw source records were incorrectly typed as semantic Graph rooms");
+
+const additiveAdapterPath = path.join(originalA, "atlas-additive-adapter.mjs");
+fs.writeFileSync(additiveAdapterPath, [
+  "/** Deliberately returns semantics only so Core must preserve repository source evidence. */",
+  "export function buildAtlasCatalog({ sourceCatalog, sourceEvidenceRooms }) {",
+  "  if (!sourceCatalog || !Array.isArray(sourceEvidenceRooms)) throw new Error('missing additive source evidence');",
+  "  return {",
+  "    ...sourceCatalog,",
+  "    rooms: [",
+  "      ...sourceCatalog.rooms.filter((room) => room.metadata?.entryKind !== 'source-evidence'),",
+  "      {",
+  "        id: 'consumer-semantic-room',",
+  "        label: 'Consumer Semantic Room',",
+  "        owner: sourceCatalog.authority,",
+  "        viewpoint: 'consumer-owned semantic catalog extension',",
+  "        summary: 'Consumer semantic navigation remains separate from source evidence.',",
+  "        generatedSummary: 'Consumer semantic navigation remains separate from source evidence.',",
+  "        sourceRepos: [sourceCatalog.authority],",
+  "        answers: ['where the consumer semantic extension lives'],",
+  "        facets: ['consumer-semantic-room'],",
+  "        metadata: { entryKind: 'semantic-room', navigationKind: 'room-entry' },",
+  "      },",
+  "    ],",
+  "  };",
+  "}",
+  "",
+].join("\n"));
+const additiveInstance = {
+  ...configuredInstance,
+  adapter: {
+    module: "atlas-additive-adapter.mjs",
+    exportName: "buildAtlasCatalog",
+  },
+};
+const additiveProvider = await createAtlasInstanceProvider({ root: originalA, instance: additiveInstance });
+check(additiveProvider.catalog.rooms.some((room) => room.id === "consumer-semantic-room"),
+  "custom adapter did not retain its consumer semantic catalog");
+check(additiveProvider.catalog.rooms.some((room) => room.metadata?.sourcePath === "docs/ARCHITECTURE.md"),
+  "custom adapter could not retain Core-owned repository source evidence");
+check(additiveProvider.catalog.rooms.filter((room) => room.metadata?.sourcePath).every((room) =>
+  room.metadata.entryKind === "source-evidence" && room.metadata.navigationKind === "none"
+), "custom adapter changed source evidence into navigable Graph rooms");
+
+const genericRoute = buildAtlasInstanceRoute(genericCatalog, {
+  query: "canvas viewport resizing",
+  currentRoom: genericCatalog.authority,
+  search: searchA.search,
+  retrieval: { mode: "sqlite-token-index", indexed: true, index: indexA.index },
+});
+const genericOverview = buildAtlasInstanceGraphProjection({
+  catalog: genericCatalog,
+  roomId: genericCatalog.authority,
+  route: genericRoute,
+});
+check(genericOverview.containers.some((container) => container.kind === "architecture_source_group"), "generic Graph overview did not render source-group containers");
+check(genericOverview.edges.some((edge) => edge.kind === "contains_source_group"), "generic Graph overview did not connect repository authority to source groups");
+check(genericOverview.edges.some((edge) => edge.kind === "source_import"), "generic Graph overview omitted derived source relationships");
+check(!genericOverview.edges.some((edge) => edge.kind === "source_link"), "generic Graph overview did not suppress secondary Markdown navigation links");
+const documentationContainer = genericOverview.containers.find((container) => container.metadata?.secondary === "true");
+check(documentationContainer?.label === "Documentation", "generic Graph overview did not create one secondary documentation region");
+check(documentationContainer.metadata.sourceCount === 7 && documentationContainer.metadata.visibleSourceCount === 6, "generic Graph overview did not report bounded documentation visibility truthfully");
+check(genericOverview.metadata.architectureProjectionMode === "source-inventory" && genericOverview.metadata.architectureProjectionPolicy === "bounded-source-inventory-v1", "generic Graph fallback was not explicitly identified as source inventory");
+check(genericOverview.metadata.repositoryLabel === "Fixture Repository" && genericOverview.metadata.sourceAvailable === true, "generic Graph projection omitted its instance label or architecture availability");
+check(genericOverview.metadata.sourceRoomsHidden === 1, "generic Graph overview did not report the bounded hidden source count");
+check(genericOverview.metadata.documentationLinksAvailable > 0 && genericOverview.metadata.documentationLinksVisible === 0, "generic Graph overview did not distinguish retained from visible documentation links");
+check(genericOverview.metadata.architectureAtlas?.retrieval?.mode === "sqlite-token-index", "generic Graph overview omitted repository-local route evidence");
+
+for (const sourceRoom of [sketchRoom, architectureRoom]) {
+  let rejected = false;
+  try {
+    buildAtlasInstanceGraphProjection({ catalog: genericCatalog, roomId: sourceRoom.id });
+  } catch (error) {
+    rejected = error.statusCode === 404 && error.message.includes("not an architecture room");
+  }
+  check(rejected, `source evidence ${sourceRoom.metadata.sourcePath} was incorrectly enterable as a room`);
+}
+check(genericOverview.nodes.filter((node) => node.id !== genericCatalog.authority).every((node) =>
+  node.drilldownCapable === false
+    && node.metadata.entryKind === "source-evidence"
+    && node.metadata.navigationKind === "none"
+    && node.metadata.roomGraphFreshnessStatus === ""
+), "source-inventory projection exposed source nodes as drilldown-capable");
+
+// Reproduce the former duration.py failure mode: a custom adapter asserted a
+// semantic room and endpoint but omitted explicit model freshness. Core must
+// treat the incomplete claim as non-navigable evidence rather than repairing it.
+const incompleteCustomRoom = {
+  ...pythonDurationRoom,
+  id: "duration",
+  label: "duration",
+  metadata: {
+    ...pythonDurationRoom.metadata,
+    entryKind: "semantic-room",
+    navigationKind: "room-entry",
+    roomGraphStatus: "available",
+    roomGraphSourceModel: "consumer-semantic-system-model-v1",
+    roomGraphFreshnessStatus: "",
+    graphEndpoint: "/api/architecture-graph?slice=DURATION",
+  },
+};
+const incompleteCustomCatalog = {
+  ...genericCatalog,
+  rooms: [...genericCatalog.rooms, incompleteCustomRoom],
+  metadata: {
+    ...genericCatalog.metadata,
+    sourceModel: "consumer-semantic-system-model-v1",
+    repositorySystemModelStatus: "current",
+  },
+};
+let incompleteCustomRoomRejected = false;
+try {
+  buildAtlasInstanceGraphProjection({ catalog: incompleteCustomCatalog, roomId: incompleteCustomRoom.id });
+} catch (error) {
+  incompleteCustomRoomRejected = error.statusCode === 404 && error.message.includes("not an architecture room");
+}
+check(incompleteCustomRoomRejected, "custom adapter room without explicit semantic freshness remained enterable");
+const incompleteCustomRoute = buildAtlasInstanceRoute(incompleteCustomCatalog, { currentRoom: incompleteCustomRoom.id });
+check(incompleteCustomRoute.plan.selected.entryKind === "source-evidence"
+  && incompleteCustomRoute.plan.selected.navigationKind === "none"
+  && incompleteCustomRoute.plan.selected.roomGraphStatus === "unavailable"
+  && incompleteCustomRoute.plan.selected.roomGraphFreshnessStatus === ""
+  && incompleteCustomRoute.plan.selected.graphEndpoint === "",
+"Router manufactured navigation metadata for an incomplete custom semantic-room claim");
+
+const syncEnv = { ATLAS_SYNC_EXCHANGE_ROOT: exchangeRoot };
+const payloadBase = path.join(workRoot, "base.json");
+const payloadA = path.join(workRoot, "machine-a.json");
+const payloadB = path.join(workRoot, "machine-b.json");
+const payloadMerge = path.join(workRoot, "merge.json");
+fs.writeFileSync(payloadBase, '{"claim":"base"}\n');
+fs.writeFileSync(payloadA, '{"claim":"machine-a"}\n');
+fs.writeFileSync(payloadB, '{"claim":"machine-b"}\n');
+fs.writeFileSync(payloadMerge, '{"claim":"reviewed-merge"}\n');
+
+/** Appends one immutable memory revision through the installed repository-local sync command. */
+const append = (command, cwd, machineId, sequence, payloadFile, parents = []) => runJson(command, [
+  "sync", "append",
+  "--logical-key", "memory/CURRENT.md",
+  "--machine-id", machineId,
+  "--sequence", String(sequence),
+  ...parents.flatMap((parent) => ["--parent", parent]),
+  "--payload-file", payloadFile,
+], { cwd, env: syncEnv }).payload.revision;
+
+const base = append(commandA, originalA, "fixture-machine-a", 1, payloadBase);
+const headA = append(commandA, originalA, "fixture-machine-a", 2, payloadA, [base.revisionId]);
+const commandB = path.join(machineB, ".atlas", "bin", "atlas");
+const headB = append(commandB, machineB, "fixture-machine-b", 1, payloadB, [base.revisionId]);
+const conflict = runJson(commandB, ["sync", "status"], { cwd: machineB, env: syncEnv, allowedStatus: [2] }).payload;
+check(conflict.status === "conflict" && conflict.conflicts.some((row) => row.kind === "divergent-active-claims"), "installed Atlas instances did not expose divergence");
+const merged = append(commandA, originalA, "fixture-machine-a", 3, payloadMerge, [headA.revisionId, headB.revisionId]);
+const resolved = runJson(commandA, ["sync", "status"], { cwd: originalA, env: syncEnv }).payload;
+check(resolved.status === "pass" && resolved.records[0]?.resolution?.revisionId === merged.revisionId, "installed Atlas instances did not accept reviewed merge revision");
+
+fs.renameSync(originalA, movedA);
+const movedCommand = path.join(movedA, ".atlas", "bin", "atlas");
+const detachedEnv = {
+  MULTIHEAD_ATLAS_ROOT: path.join(workRoot, "missing-atlas-development-checkout"),
+  MULTIHEAD_ATLAS_SOURCE: path.join(workRoot, "missing-atlas-development-checkout"),
+};
+const movedVerify = runJson(movedCommand, ["verify"], { cwd: movedA, env: detachedEnv }).payload;
+check(movedVerify.status === "pass", "moved installed instance retained its original absolute path or development checkout dependency");
+
+const trackedInstanceText = [
+  fs.readFileSync(path.join(movedA, ".atlas", "atlas.instance.json"), "utf8"),
+  fs.readFileSync(path.join(movedA, ".atlas", "atlas.install.json"), "utf8"),
+  fs.readFileSync(path.join(movedA, ".atlas", "atlas.lock.json"), "utf8"),
+].join("\n");
+for (const forbidden of [atlasSource, graphSource, originalA]) {
+  check(!trackedInstanceText.includes(forbidden), `tracked Atlas instance retained a source absolute path: ${forbidden}`);
+}
+
+const requestedGraphPort = 8975;
+const decoyPath = path.join(workRoot, "graph-port-decoy.mjs");
+fs.writeFileSync(decoyPath, [
+  'import http from "node:http";',
+  "http.createServer((_request, response) => {",
+  '  response.writeHead(200, { "Content-Type": "text/html" });',
+  '  response.end("<title>Atlas</title><main class=\\"memory-graph-root\\"></main>");',
+  `}).listen(${requestedGraphPort}, "127.0.0.1");`,
+  "",
+].join("\n"));
+const decoy = childProcess.spawn(process.execPath, [decoyPath], {
+  cwd: workRoot,
+  stdio: "ignore",
+});
+waitForPort(requestedGraphPort);
+let graphSmoke;
+try {
+  graphSmoke = run(movedCommand, ["graph", "--smoke", "--provider-port", "8875", "--graph-port", String(requestedGraphPort)], {
+    cwd: movedA,
+    env: detachedEnv,
+  });
+} finally {
+  decoy.kill("SIGTERM");
+}
+check(graphSmoke.stdout.includes("smoke: pass"), "repository-local Atlas Graph smoke failed");
+check(/Memory Graph: http:\/\/127\.0\.0\.1:\d+\/#architecture(?:\r?\n|$)/u.test(graphSmoke.stdout),
+  "Atlas Graph launched the repository authority as a self-entry room");
+const servedGraphPort = Number(graphSmoke.stdout.match(/Memory Graph: http:\/\/127\.0\.0\.1:(\d+)\//)?.[1] || 0);
+check(servedGraphPort > 0 && servedGraphPort !== requestedGraphPort, "Atlas Graph reused a lookalike server without the installed runtime identity");
+
+console.log(JSON.stringify({
+  schema: "multihead-atlas.instance_contract_test.v1",
+  status: "pass",
+  repositoryId: "fixture-repository",
+  metrics: {
+    initializedInstances: 2,
+    indexedRooms: indexA.index.metrics.rooms,
+    installedSearch: 1,
+    installedEvidenceV2: 1,
+    customAdapterSourceCompositions: 1,
+    admittedCodeSources: 1,
+    derivedSourceRelationships: genericCatalog.metadata.sourceRelationships,
+    structuralSourceGroups: genericCatalog.metadata.sourceGroups,
+    contextualGraphDrilldowns: 0,
+    sourceInventoryDrilldownRefusals: 2,
+    incompleteCustomRoomRefusals: 1,
+    boundedRepositoryOverviews: 1,
+    secondaryDocumentationRegions: 1,
+    repositoryRoutePackets: 1,
+    markdownHeadingLabels: 1,
+    sourcePolicyMutationRefusals: 1,
+    pathMoves: 1,
+    developmentCheckoutDependencies: 0,
+    divergentConflicts: conflict.conflicts.length,
+    reviewedMergeResolutions: 1,
+    graphSmoke: 1,
+    graphLookalikePortRefusals: 1,
+  },
+  movedRoot: movedA,
+  exchangeRoot,
+}, null, 2));

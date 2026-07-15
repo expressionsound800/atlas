@@ -1,0 +1,578 @@
+#!/usr/bin/env node
+
+/*
+ * Generation Contract Test installs Atlas into one arbitrary synthetic
+ * repository and proves the current-agent handshake, generic command adapter,
+ * stale-source rejection, generated-index consumption, and remote invocation
+ * gate. The optional live mode uses only this fixture when calling OpenAI.
+ */
+
+import childProcess from "node:child_process";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import {
+  ATLAS_GENERATION_RESULT_SCHEMA,
+  ATLAS_REPOSITORY_SYSTEM_MODEL_SCHEMA,
+  canonicalAtlasGenerationJson,
+} from "../product/generation-provider.mjs";
+import {
+  buildAtlasInstanceCatalog,
+  buildAtlasInstanceGraphProjection,
+  buildAtlasInstanceRoute,
+} from "../product/instance-contract.mjs";
+
+/** Reads one contract-test option from separated or equals-prefixed CLI syntax. */
+function argValue(name, fallback = "") {
+  const exact = process.argv.indexOf(name);
+  if (exact >= 0) return process.argv[exact + 1] || fallback;
+  const prefixed = process.argv.find((argument) => argument.startsWith(`${name}=`));
+  return prefixed ? prefixed.slice(name.length + 1) : fallback;
+}
+
+/** Returns whether one exact opt-in contract-test flag was supplied. */
+function enabled(name) {
+  return process.argv.includes(name);
+}
+
+/** Checks one generation invariant and rejects the fixture at its first failure. */
+function check(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+/** Runs one fixture command and accepts only explicitly declared process statuses. */
+function run(command, args, options = {}) {
+  const result = childProcess.spawnSync(command, args, {
+    cwd: options.cwd,
+    env: { ...process.env, ...(options.env || {}) },
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const allowed = options.allowedStatus || [0];
+  if (!allowed.includes(result.status)) {
+    throw new Error(`Command failed (${result.status}): ${command} ${args.join(" ")}\n${result.stdout}\n${result.stderr}`);
+  }
+  return result;
+}
+
+/** Runs an installed Atlas command and parses its required JSON stdout payload. */
+function runJson(command, args, options = {}) {
+  const result = run(command, args, options);
+  try {
+    return { result, payload: JSON.parse(result.stdout) };
+  } catch (error) {
+    throw new Error(`Command did not return JSON: ${command} ${args.join(" ")}\n${result.stdout}\n${error}`);
+  }
+}
+
+/** Waits until the live fixture provider returns one successful health response. */
+async function waitForProvider(url) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) return;
+    } catch {
+      // The provider is expected to refuse connections during its short startup window.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Atlas fixture provider did not become ready: ${url}`);
+}
+
+/** Writes one deterministic source-only repository without private consumer material. */
+function writeFixture(root) {
+  fs.mkdirSync(path.join(root, "docs"), { recursive: true });
+  fs.mkdirSync(path.join(root, "src"), { recursive: true });
+  fs.writeFileSync(path.join(root, "README.md"), "# Generation Fixture\n\nSynthetic Atlas provider validation source.\n", "utf8");
+  fs.writeFileSync(path.join(root, "docs", "ARCHITECTURE.md"), "# Fixture Architecture\n\nThe repository owns a bounded generation handshake.\n", "utf8");
+  for (let index = 0; index < 28; index += 1) {
+    fs.writeFileSync(
+      path.join(root, "docs", `orientation-${String(index).padStart(2, "0")}.md`),
+      `# Orientation Evidence ${index}\n\nSynthetic bounded repository evidence ${index}.\n`,
+      "utf8",
+    );
+  }
+  for (let index = 0; index < 24; index += 1) {
+    const next = (index + 1) % 24;
+    fs.writeFileSync(
+      path.join(root, "src", `module-${String(index).padStart(2, "0")}.js`),
+      `import "./module-${String(next).padStart(2, "0")}.js";\nexport const fixture${index} = ${index};\n`,
+      "utf8",
+    );
+  }
+}
+
+/** Creates one current-agent result whose provenance exactly mirrors a stored request. */
+function currentAgentResult(request, summary) {
+  return {
+    schema: ATLAS_GENERATION_RESULT_SCHEMA,
+    requestDigest: request.requestDigest,
+    provider: { id: "codex", mode: "current-agent", model: "interactive-agent" },
+    artifact: {
+      kind: request.task.kind,
+      title: "Agent-generated fixture summary",
+      summary,
+      room: { id: "", label: "", viewpoint: "", facets: [], answers: [] },
+      sources: request.sources.map(({ path: sourcePath, digest }) => ({ path: sourcePath, digest })),
+    },
+  };
+}
+
+/** Builds a two-component source-cited repository model for strict learning validation. */
+function currentAgentSystemModelResult(request) {
+  const evidence = request.sources.map(({ path: sourcePath, digest }) => ({ path: sourcePath, digest }));
+  const primary = evidence[0];
+  return {
+    schema: ATLAS_GENERATION_RESULT_SCHEMA,
+    requestDigest: request.requestDigest,
+    provider: { id: "codex", mode: "current-agent", model: "interactive-agent" },
+    artifact: {
+      kind: "repository-system-model",
+      title: "Generation fixture system model",
+      summary: "The learned model separates repository orientation from bounded generation execution.",
+      room: { id: "", label: "", viewpoint: "", facets: [], answers: [] },
+      sources: evidence,
+      systemModel: {
+        schema: ATLAS_REPOSITORY_SYSTEM_MODEL_SCHEMA,
+        repository: {
+          purpose: "Exercises the source-bounded Atlas generation and learning contract.",
+          nonGoals: ["It does not represent a production application."],
+          evidence: evidence.slice(0, 16),
+          confidence: 0.95,
+        },
+        components: [
+          {
+            id: "repository-orientation",
+            label: "Repository Orientation",
+            responsibility: "Selects bounded repository evidence for semantic learning.",
+            viewpoint: "learning input boundary",
+            region: "Learning",
+            facets: ["orientation", "source-evidence"],
+            answers: ["which sources orient repository learning"],
+            evidence: [primary],
+            confidence: 0.9,
+          },
+          {
+            id: "generation-execution",
+            label: "Generation Execution",
+            responsibility: "Executes the validated current-agent or command-adapter handshake.",
+            viewpoint: "generation provider boundary",
+            region: "Learning",
+            facets: ["generation", "provider-contract"],
+            answers: ["how a learned model enters Atlas state"],
+            evidence: [primary],
+            confidence: 0.9,
+          },
+        ],
+        relationships: [{
+          id: "orientation-supplies-generation",
+          from: "repository-orientation",
+          to: "generation-execution",
+          kind: "supplies",
+          label: "supplies bounded evidence",
+          description: "Repository orientation supplies exact source evidence to generation execution.",
+          evidence: [primary],
+          confidence: 0.9,
+        }],
+        flows: [{
+          id: "repository-learning-flow",
+          label: "learn repository",
+          description: "Bounded evidence becomes a validated semantic model.",
+          steps: [
+            { componentId: "repository-orientation", action: "select bounded evidence" },
+            { componentId: "generation-execution", action: "validate and apply the model" },
+          ],
+          evidence: [primary],
+          confidence: 0.9,
+        }],
+        unknowns: [{
+          id: "production-scale-unknown",
+          description: "The fixture does not establish production-scale behavior.",
+          evidence: [primary],
+          confidence: 0.8,
+        }],
+      },
+    },
+  };
+}
+
+/** Writes a repository-local candidate result for the installed apply command. */
+function writeCandidate(root, name, value) {
+  const candidate = path.join(root, ".atlas", "state", "generation", name);
+  fs.mkdirSync(path.dirname(candidate), { recursive: true });
+  fs.writeFileSync(candidate, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  return path.relative(root, candidate);
+}
+
+/** Counts exact credential bytes in the synthetic repository without printing the secret value. */
+function credentialMatches(root, credential) {
+  if (!credential) return 0;
+  const needle = Buffer.from(credential, "utf8");
+  let matches = 0;
+  /** Traverses regular fixture files without following links or interpreting their contents as text. */
+  const visit = (entryPath) => {
+    const stat = fs.lstatSync(entryPath);
+    if (stat.isSymbolicLink()) return;
+    if (stat.isDirectory()) {
+      for (const name of fs.readdirSync(entryPath)) visit(path.join(entryPath, name));
+      return;
+    }
+    if (stat.isFile() && fs.readFileSync(entryPath).includes(needle)) matches += 1;
+  };
+  visit(root);
+  return matches;
+}
+
+const workRootValue = argValue("--work-root");
+const graphSourceValue = argValue("--graph-source");
+check(workRootValue && path.isAbsolute(workRootValue), "--work-root must be an absolute registered technical-space path");
+check(graphSourceValue, "--graph-source is required");
+const workRoot = path.resolve(workRootValue);
+const atlasSource = path.resolve(argValue("--atlas-source", path.resolve(import.meta.dirname, "..")));
+const graphSource = path.resolve(graphSourceValue);
+const repository = path.join(workRoot, "synthetic-generation-repository");
+
+fs.rmSync(workRoot, { recursive: true, force: true });
+writeFixture(repository);
+
+runJson(process.execPath, [
+  path.join(atlasSource, "scripts", "atlas-init"),
+  "--repo", repository,
+  "--repository-id", "generation-fixture",
+  "--include", "README.md",
+  "--include", "docs",
+  "--include", "src",
+  "--extension", ".js",
+  "--atlas-source", atlasSource,
+  "--graph-source", graphSource,
+  "--allow-source-changes",
+  "--no-agent-instructions",
+  "--json",
+], { cwd: atlasSource });
+
+const atlas = path.join(repository, ".atlas", "bin", "atlas");
+const initialStatus = runJson(atlas, ["generation", "status"], { cwd: repository }).payload;
+const defaultTest = runJson(atlas, ["generation", "test"], { cwd: repository }).payload;
+check(initialStatus.status === "pass" && initialStatus.mode === "current-agent", "fresh instance did not default to current-agent generation");
+check(initialStatus.handshake === "request-agent-result-apply" && defaultTest.liveInvocationPerformed === false, "current-agent status did not expose the interactive handshake");
+
+const learningResponse = runJson(atlas, ["map"], { cwd: repository }).payload;
+const learningRequest = JSON.parse(fs.readFileSync(path.join(repository, learningResponse.requestPath), "utf8"));
+const learning = { ...learningResponse, request: learningRequest };
+check(learning.schema === "multihead-atlas.map_result.v1", "atlas map did not expose its command-result schema");
+check(learning.status === "action-required" && learning.request.task.kind === "repository-system-model", "atlas map did not create the current-agent repository-system-model handshake");
+check(learning.orientation.sourcePaths.length > 0 && learning.orientation.sourcePaths.length <= 24, "atlas map did not expose bounded deterministic orientation sources");
+check(learning.request.sources.length > 16, "repository-learning fixture did not exercise the model claim-citation bound with a larger orientation packet");
+const repeatedLearning = runJson(atlas, ["map"], { cwd: repository }).payload;
+check(learning.request.requestDigest === repeatedLearning.requestDigest, "atlas map orientation and request identity were not deterministic");
+const retiredLearnCommand = run(atlas, ["learn"], { cwd: repository, allowedStatus: [1] });
+check(retiredLearnCommand.stderr.includes("Unknown Atlas instance command: learn"), "retired atlas learn command remained callable beside atlas map");
+const learnedCandidate = writeCandidate(repository, "repository-system-model-result.json", currentAgentSystemModelResult(learning.request));
+const unselectedSource = Array.from({ length: 28 }, (_unused, index) => `docs/orientation-${String(index).padStart(2, "0")}.md`)
+  .find((sourcePath) => !learning.orientation.sourcePaths.includes(sourcePath));
+check(unselectedSource, "learning fixture did not retain an admitted source outside the bounded orientation packet");
+const unselectedAbsolute = path.join(repository, unselectedSource);
+const unselectedOriginal = fs.readFileSync(unselectedAbsolute, "utf8");
+fs.appendFileSync(unselectedAbsolute, "\nChanged outside the selected orientation packet.\n", "utf8");
+const staleInventoryApply = run(atlas, ["generation", "apply", "--artifact", learnedCandidate], { cwd: repository, allowedStatus: [1] });
+check(staleInventoryApply.stderr.includes("repository inventory is stale"), "repository model apply ignored a changed unselected admitted source");
+fs.writeFileSync(unselectedAbsolute, unselectedOriginal, "utf8");
+const learnedApplied = runJson(atlas, ["generation", "apply", "--artifact", learnedCandidate], { cwd: repository }).payload;
+check(learnedApplied.status === "pass" && learnedApplied.index.metrics.generatedSummaries >= 2, "fresh learned repository model did not rebuild the semantic index");
+const divergentResult = currentAgentSystemModelResult(learning.request);
+divergentResult.artifact.summary = "A second valid judgment over the same repository-learning request.";
+divergentResult.artifact.systemModel.repository.purpose = "Exercises preservation of divergent source-cited repository judgments for one input request.";
+const divergentCandidate = writeCandidate(repository, "repository-system-model-divergent-result.json", divergentResult);
+const expectedModelDigest = crypto.createHash("sha256")
+  .update(canonicalAtlasGenerationJson(divergentResult.artifact.systemModel))
+  .digest("hex");
+const expectedResultDigest = crypto.createHash("sha256")
+  .update(canonicalAtlasGenerationJson(divergentResult))
+  .digest("hex");
+const applyRefreshPort = 8992;
+const applyRefreshProvider = childProcess.spawn(path.join(repository, ".atlas", "runtime", "atlas", "scripts", "atlas-provider"), [], {
+  cwd: repository,
+  env: { ...process.env, ATLAS_PROVIDER_PORT: String(applyRefreshPort) },
+  stdio: "ignore",
+});
+let divergentApplied;
+try {
+  await waitForProvider(`http://127.0.0.1:${applyRefreshPort}/`);
+  const beforeApplyResponse = await fetch(`http://127.0.0.1:${applyRefreshPort}/api/architecture-graph?slice=GENERATION-FIXTURE`);
+  const beforeApply = await beforeApplyResponse.json();
+  divergentApplied = runJson(atlas, ["generation", "apply", "--artifact", divergentCandidate], { cwd: repository }).payload;
+  const afterApplyResponse = await fetch(`http://127.0.0.1:${applyRefreshPort}/api/architecture-graph?slice=GENERATION-FIXTURE`);
+  const afterApply = await afterApplyResponse.json();
+  check(beforeApplyResponse.status === 200
+    && afterApplyResponse.status === 200
+    && beforeApply.metadata?.repositorySystemModelDigest !== expectedModelDigest
+    && afterApply.metadata?.repositorySystemModelDigest === expectedModelDigest,
+  "live provider ignored a newly applied semantic model when source inventory stayed unchanged");
+} finally {
+  applyRefreshProvider.kill("SIGTERM");
+}
+check(divergentApplied.acceptedPath !== learnedApplied.acceptedPath
+  && fs.existsSync(path.join(repository, learnedApplied.acceptedPath))
+  && fs.existsSync(path.join(repository, divergentApplied.acceptedPath)),
+"divergent valid results for one request overwrote the accepted-result history");
+const learnedCatalog = buildAtlasInstanceCatalog({ root: repository });
+const learnedOverview = buildAtlasInstanceGraphProjection({ catalog: learnedCatalog, roomId: learnedCatalog.authority });
+const learnedDetail = buildAtlasInstanceGraphProjection({ catalog: learnedCatalog, roomId: "repository-orientation" });
+const learnedRoute = buildAtlasInstanceRoute(learnedCatalog, { currentRoom: learnedCatalog.authority });
+check(learnedCatalog.metadata.repositorySystemModelStatus === "current" && learnedCatalog.metadata.semanticRooms === 2, "fresh model did not become the catalog's semantic authority");
+check(learnedCatalog.metadata.repositorySystemModelDigest === expectedModelDigest
+  && learnedCatalog.metadata.repositorySystemModelResultDigest === expectedResultDigest
+  && learnedCatalog.metadata.repositorySystemModelRequestDigest === learning.request.requestDigest,
+"catalog conflated semantic-model identity, accepted-result identity, and input-request provenance");
+check(learnedOverview.metadata.architectureProjectionMode === "repository-system-model", "Graph did not switch from source inventory to the learned semantic model");
+const learnedAuthorityNode = learnedOverview.nodes.find((node) => node.id === learnedCatalog.authority);
+check(learnedAuthorityNode?.metadata.entryKind === "repository-authority"
+  && learnedAuthorityNode.metadata.navigationKind === "none"
+  && learnedAuthorityNode.metadata.roomGraphStatus === "unavailable"
+  && learnedAuthorityNode.metadata.graphEndpoint === "",
+"learned repository authority remained enterable as its own semantic room");
+const learnedDetailAuthorityNode = learnedDetail.nodes.find((node) => node.id === learnedCatalog.authority);
+check(learnedDetailAuthorityNode?.metadata.entryKind === "repository-authority"
+  && learnedDetailAuthorityNode.metadata.navigationKind === "repository-overview"
+  && learnedDetailAuthorityNode.metadata.overviewReturnCapable === "true"
+  && learnedDetailAuthorityNode.metadata.repositoryOverviewStatus === "available"
+  && learnedDetailAuthorityNode.metadata.repositoryOverviewEndpoint === "/api/architecture-graph"
+  && learnedDetailAuthorityNode.metadata.roomGraphStatus === "unavailable"
+  && learnedDetailAuthorityNode.metadata.graphEndpoint === "",
+"semantic room context did not expose its repository authority as an overview return");
+check(learnedOverview.nodes.filter((node) => node.id !== learnedCatalog.authority).every((node) =>
+  node.metadata.entryKind === "semantic-room"
+    && node.metadata.navigationKind === "room-entry"
+    && node.metadata.roomGraphStatus === "available"
+), "learned Graph projection included a non-semantic drilldown target");
+check(learnedOverview.containers.every((container) =>
+  container.role === ""
+    && !container.description.includes("learned semantic")
+    && Array.isArray(container.metadata.componentLabels)
+    && container.metadata.componentLabels.length > 0
+), "learned Graph regions retained generic template prose instead of component names");
+check(!learnedRoute.candidates.find((candidate) => candidate.roomId === learnedCatalog.authority)?.graphEndpoint,
+  "learned Router exposed the repository authority as a self-navigation target");
+check(learnedOverview.edges.some((edge) => edge.kind === "semantic_relationship") && learnedOverview.edges.some((edge) => edge.kind === "semantic_flow"), "learned Graph projection omitted directed system relationships or flows");
+const learnedComponentNode = learnedOverview.nodes.find((node) => node.id === "repository-orientation");
+const learnedRelationshipEdge = learnedOverview.edges.find((edge) => edge.kind === "semantic_relationship");
+const learnedFlowEdge = learnedOverview.edges.find((edge) => edge.kind === "semantic_flow");
+check(learnedComponentNode?.metadata.semanticRegion === "Learning"
+  && learnedComponentNode.metadata.semanticConfidence === 0.9
+  && learnedComponentNode.metadata.semanticEvidence?.[0]?.digest
+  && learnedComponentNode.metadata.repositorySystemModelDigest === expectedModelDigest
+  && learnedComponentNode.metadata.repositorySystemModelResultDigest === expectedResultDigest
+  && learnedComponentNode.metadata.repositorySystemModelRequestDigest === learning.request.requestDigest,
+"learned Graph node stripped semantic region, confidence, evidence, or model provenance");
+check(learnedRelationshipEdge?.metadata.semanticKind === "supplies"
+  && learnedRelationshipEdge.metadata.confidence === 0.9
+  && learnedRelationshipEdge.metadata.evidence?.[0]?.digest,
+"learned Graph relationship stripped semantic kind, confidence, or evidence");
+check(learnedFlowEdge?.metadata.semanticKind === "directed-flow"
+  && learnedFlowEdge.metadata.confidence === 0.9
+  && learnedFlowEdge.metadata.evidence?.[0]?.digest,
+"learned Graph flow stripped confidence, evidence, or flow identity");
+check(learnedRoute.candidates.filter((candidate) => candidate.entryKind === "semantic-room").every((candidate) =>
+  candidate.navigationKind === "room-entry"
+    && candidate.roomGraphStatus === "available"
+    && candidate.roomGraphSourceModel === "multihead-atlas-repository-system-model-v1"
+    && candidate.roomGraphFreshnessStatus === "source-digest-current"
+    && candidate.graphEndpoint
+), "learned Router candidates omitted strict semantic navigation metadata");
+const liveProviderPort = 8993;
+const liveProvider = childProcess.spawn(path.join(repository, ".atlas", "runtime", "atlas", "scripts", "atlas-provider"), [], {
+  cwd: repository,
+  env: { ...process.env, ATLAS_PROVIDER_PORT: String(liveProviderPort) },
+  stdio: "ignore",
+});
+try {
+  await waitForProvider(`http://127.0.0.1:${liveProviderPort}/`);
+  const liveSemantic = await fetch(`http://127.0.0.1:${liveProviderPort}/api/architecture-graph?slice=REPOSITORY-ORIENTATION`);
+  check(liveSemantic.status === 200, "live provider did not initially serve the current learned semantic room");
+  fs.appendFileSync(unselectedAbsolute, "\nChanged after model acceptance.\n", "utf8");
+  const staleSemantic = await fetch(`http://127.0.0.1:${liveProviderPort}/api/architecture-graph?slice=REPOSITORY-ORIENTATION`);
+  check(staleSemantic.status === 404, "live provider kept a learned room navigable after its full inventory became stale");
+  const fallbackOverviewResponse = await fetch(`http://127.0.0.1:${liveProviderPort}/api/architecture-graph?slice=GENERATION-FIXTURE`);
+  const fallbackOverview = await fallbackOverviewResponse.json();
+  check(fallbackOverviewResponse.status === 200 && fallbackOverview.metadata?.architectureProjectionMode === "source-inventory",
+    "live provider did not rebind to Source Inventory after learned-model invalidation");
+  const staleInventoryCatalog = buildAtlasInstanceCatalog({ root: repository });
+  check(staleInventoryCatalog.metadata.repositorySystemModelStatus === "missing"
+    && staleInventoryCatalog.metadata.diagnostics.some((diagnostic) => diagnostic.code === "generation-artifact-quarantined"), "current model was not quarantined after an unselected admitted source changed");
+} finally {
+  fs.writeFileSync(unselectedAbsolute, unselectedOriginal, "utf8");
+  liveProvider.kill("SIGTERM");
+}
+const learnedSearch = runJson(atlas, ["search", "generation-execution", "--limit", "1"], { cwd: repository }).payload;
+check(learnedSearch.search.results[0]?.id === "generation-execution", "semantic repository room did not enter retrieval after learning");
+
+const badEndpointResult = currentAgentSystemModelResult(learning.request);
+badEndpointResult.artifact.systemModel.relationships[0].to = "missing-component";
+const badEndpointCandidate = writeCandidate(repository, "bad-endpoint-result.json", badEndpointResult);
+const badEndpointApply = run(atlas, ["generation", "apply", "--artifact", badEndpointCandidate], { cwd: repository, allowedStatus: [1] });
+check(badEndpointApply.stderr.includes("distinct semantic component endpoints"), "repository model accepted a relationship with a missing endpoint");
+
+const pseudoRoomResult = currentAgentSystemModelResult(learning.request);
+const pseudoSource = learning.request.sources[0];
+pseudoRoomResult.artifact.systemModel.components[0].id = path.basename(pseudoSource.path, path.extname(pseudoSource.path)).toLowerCase();
+pseudoRoomResult.artifact.systemModel.components[0].label = path.basename(pseudoSource.path, path.extname(pseudoSource.path));
+const pseudoRoomCandidate = writeCandidate(repository, "pseudo-room-result.json", pseudoRoomResult);
+const pseudoRoomApply = run(atlas, ["generation", "apply", "--artifact", pseudoRoomCandidate], { cwd: repository, allowedStatus: [1] });
+check(pseudoRoomApply.stderr.includes("sole evidence filename"), "repository model accepted a filename-derived pseudo semantic room");
+
+const requestPayload = runJson(atlas, [
+  "generation", "request",
+  "--kind", "source-summary",
+  "--source", "docs/ARCHITECTURE.md",
+], { cwd: repository }).payload;
+const request = requestPayload.request;
+const repeatedRequest = runJson(atlas, [
+  "generation", "request",
+  "--kind", "source-summary",
+  "--source", "docs/ARCHITECTURE.md",
+], { cwd: repository }).payload.request;
+check(request.requestDigest === repeatedRequest.requestDigest, "identical current-agent requests were not deterministic");
+
+const candidatePath = writeCandidate(repository, "current-agent-result.json", currentAgentResult(
+  request,
+  "Agent generated synthesis marker for the bounded repository architecture source.",
+));
+const applied = runJson(atlas, ["generation", "apply", "--artifact", candidatePath], { cwd: repository }).payload;
+check(applied.status === "pass" && applied.index.metrics.generatedSummaries >= 3, "current-agent artifact was not applied alongside the learned semantic index");
+const generatedSearch = runJson(atlas, ["search", "synthesis marker", "--limit", "2"], { cwd: repository }).payload;
+check(generatedSearch.search.results[0]?.generatedSummary?.includes("synthesis marker"), "retrieval did not consume the current-agent summary");
+
+const staleRequest = runJson(atlas, [
+  "generation", "request",
+  "--kind", "source-summary",
+  "--source", "docs/ARCHITECTURE.md",
+], { cwd: repository }).payload.request;
+fs.appendFileSync(path.join(repository, "docs", "ARCHITECTURE.md"), "\nThe source changed after request creation.\n", "utf8");
+const staleCandidate = writeCandidate(repository, "stale-result.json", currentAgentResult(staleRequest, "This stale artifact must be rejected."));
+const staleApply = run(atlas, ["generation", "apply", "--artifact", staleCandidate], { cwd: repository, allowedStatus: [1] });
+check(staleApply.stderr.includes("source is stale"), "generation apply did not reject changed source bytes");
+
+const mockCommand = ".atlas/runtime/atlas/scripts/atlas-generation-mock";
+const mutatingAdapter = path.join(repository, "mutating-generation-adapter.mjs");
+fs.writeFileSync(mutatingAdapter, [
+  "#!/usr/bin/env node",
+  'import childProcess from "node:child_process";',
+  'import fs from "node:fs";',
+  'import path from "node:path";',
+  "let input = \"\";",
+  "for await (const chunk of process.stdin) input += chunk;",
+  `fs.appendFileSync(path.join(process.cwd(), ${JSON.stringify(unselectedSource)}), "\\nChanged while the command adapter was running.\\n", "utf8");`,
+  'const mock = path.join(process.cwd(), ".atlas/runtime/atlas/scripts/atlas-generation-mock");',
+  'const result = childProcess.spawnSync(mock, [], { input, encoding: "utf8", env: process.env });',
+  'process.stderr.write(result.stderr || "");',
+  'process.stdout.write(result.stdout || "");',
+  'process.exitCode = result.status ?? 1;',
+  "",
+].join("\n"), "utf8");
+fs.chmodSync(mutatingAdapter, 0o755);
+runJson(atlas, [
+  "generation", "configure", "command",
+  "--id", "atlas-mutating-mock",
+  "--command", path.relative(repository, mutatingAdapter),
+  "--data-boundary", "local",
+], { cwd: repository });
+const midRunMutation = run(atlas, ["map"], { cwd: repository, allowedStatus: [1] });
+check(midRunMutation.stderr.includes("repository inventory is stale"), "direct atlas map accepted an unselected source changed during adapter execution");
+fs.writeFileSync(unselectedAbsolute, unselectedOriginal, "utf8");
+const configuredMock = runJson(atlas, [
+  "generation", "configure", "command",
+  "--id", "atlas-mock",
+  "--command", mockCommand,
+  "--data-boundary", "local",
+], { cwd: repository }).payload;
+check(configuredMock.generation.mode === "command" && configuredMock.generation.providerId === "atlas-mock", "mock command adapter configuration failed");
+const mockRun = runJson(atlas, [
+  "generation", "run",
+  "--kind", "room-specification",
+  "--source", "README.md",
+], { cwd: repository }).payload;
+check(mockRun.status === "pass" && mockRun.provider.id === "atlas-mock", "generic command adapter did not complete the protocol");
+check(mockRun.index.metrics.generatedSummaries >= 1 && mockRun.artifact.room.id, "command artifact did not reach the generated index and Graph catalog");
+const mockMap = runJson(atlas, ["map"], { cwd: repository }).payload;
+check(mockMap.schema === "multihead-atlas.map_result.v1" && mockMap.status === "pass" && mockMap.semanticModel.rooms === 1, "command adapter did not complete atlas map through the shared generation contract");
+
+const openAICommand = ".atlas/runtime/atlas/scripts/atlas-generation-openai";
+runJson(atlas, [
+  "generation", "configure", "command",
+  "--id", "openai",
+  "--command", openAICommand,
+  "--data-boundary", "remote",
+], { cwd: repository });
+const blockedRemote = run(atlas, [
+  "generation", "run",
+  "--kind", "source-summary",
+  "--source", "README.md",
+], { cwd: repository, allowedStatus: [1] });
+check(blockedRemote.stderr.includes("explicit --allow-remote grant"), "remote adapter ran without an invocation grant");
+const uncredentialedRemote = run(atlas, [
+  "generation", "run",
+  "--kind", "source-summary",
+  "--source", "README.md",
+  "--allow-remote",
+], { cwd: repository, env: { OPENAI_API_KEY: "" }, allowedStatus: [1] });
+check(uncredentialedRemote.stderr.includes("requires OPENAI_API_KEY"), "OpenAI adapter did not keep authentication in the environment");
+const unpinnedRemote = run(atlas, [
+  "generation", "run",
+  "--kind", "source-summary",
+  "--source", "README.md",
+  "--allow-remote",
+], {
+  cwd: repository,
+  env: { OPENAI_API_KEY: "contract-fixture-key", ATLAS_OPENAI_MODEL: "", OPENAI_MODEL: "" },
+  allowedStatus: [1],
+});
+check(unpinnedRemote.stderr.includes("requires ATLAS_OPENAI_MODEL or OPENAI_MODEL"), "OpenAI adapter selected an implicit hosted model");
+
+let liveOpenAI = 0;
+if (enabled("--live-openai")) {
+  check(Boolean(process.env.OPENAI_API_KEY), "--live-openai requires OPENAI_API_KEY");
+  const live = runJson(atlas, [
+    "generation", "run",
+    "--kind", "source-summary",
+    "--source", "README.md",
+    "--instruction", "Summarize the synthetic fixture in one precise sentence.",
+    "--allow-remote",
+  ], { cwd: repository }).payload;
+  check(live.status === "pass" && live.provider.id === "openai", "live OpenAI adapter did not produce a valid Atlas artifact");
+  liveOpenAI = 1;
+}
+
+runJson(atlas, ["generation", "configure", "current-agent"], { cwd: repository });
+const finalStatus = runJson(atlas, ["generation", "status"], { cwd: repository }).payload;
+const trackedConfig = fs.readFileSync(path.join(repository, ".atlas", "atlas.instance.json"), "utf8");
+check(finalStatus.mode === "current-agent", "fixture did not restore the default generation mode");
+check(!trackedConfig.includes("OPENAI_API_KEY") && !trackedConfig.includes("sk-"), "tracked generation configuration contains credential material");
+check(!trackedConfig.includes(atlasSource) && !trackedConfig.includes(graphSource), "tracked generation configuration contains product source paths");
+const persistedCredentialMatches = credentialMatches(repository, String(process.env.OPENAI_API_KEY || ""));
+check(persistedCredentialMatches === 0, "OpenAI credential bytes were persisted in the synthetic repository");
+
+console.log(JSON.stringify({
+  schema: "multihead-atlas.generation_contract_test.v1",
+  status: "pass",
+  repositoryId: "generation-fixture",
+  metrics: {
+    currentAgentHandshakes: 1,
+    repositoryLearningHandshakes: 2,
+    semanticModelsApplied: 3,
+    divergentAcceptedResultsPreserved: 1,
+    liveProviderStaleModelsRejected: 1,
+    invalidSemanticModelsRejected: 2,
+    staleUnselectedInventoriesRejected: 2,
+    midRunInventoryMutationsRejected: 1,
+    deterministicRequests: 1,
+    staleArtifactsRejected: 1,
+    commandAdapters: 1,
+    generatedIndexConsumptions: 2,
+    ungrantedRemoteInvocationsBlocked: 1,
+    uncredentialedRemoteInvocationsBlocked: 1,
+    unpinnedRemoteInvocationsBlocked: 1,
+    liveOpenAI,
+    credentialValuesPersisted: persistedCredentialMatches,
+  },
+  workRoot,
+}, null, 2));

@@ -1,0 +1,237 @@
+#!/usr/bin/env node
+
+/*
+ * Atlas Uninstall Contract Test owns arbitrary-repository fixtures for exact
+ * install/remove restoration, sync-history refusal, external-exchange
+ * preservation, unknown-control-plane refusal, damaged-lock recovery,
+ * locked and unproven custom-path refusal, and idempotency. Its fixture roots
+ * come only from the caller's registered technical space and never from a
+ * product or consumer source checkout.
+ */
+
+import childProcess from "node:child_process";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import {
+  ATLAS_IGNORE_BEGIN,
+  ATLAS_REPOSITORY_INTEGRATION_SCHEMA,
+} from "../product/uninstall-contract.mjs";
+import { ATLAS_INSTALLATION_LOCK_SCHEMA } from "../product/installation-contract.mjs";
+
+/** Reads one fixture option from separated or equals-prefixed command syntax. */
+function argValue(name, fallback = "") {
+  const exact = process.argv.indexOf(name);
+  if (exact >= 0) return process.argv[exact + 1] || fallback;
+  const prefixed = process.argv.find((arg) => arg.startsWith(`${name}=`));
+  return prefixed ? prefixed.slice(name.length + 1) : fallback;
+}
+
+/** Rejects the fixture at the first violated uninstall or preservation invariant. */
+function check(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+/** Runs one fixture process and accepts only the statuses declared by the caller. */
+function run(command, args, options = {}) {
+  const result = childProcess.spawnSync(command, args, {
+    cwd: options.cwd,
+    env: { ...process.env, ATLAS_SYNC_EXCHANGE_ROOT: "", ...(options.env || {}) },
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (!(options.allowedStatus || [0]).includes(result.status)) {
+    throw new Error(`Command failed (${result.status}): ${command} ${args.join(" ")}\n${result.stdout}\n${result.stderr}`);
+  }
+  return result;
+}
+
+/** Parses one fixture command's complete stdout as its required JSON contract. */
+function runJson(command, args, options = {}) {
+  const result = run(command, args, options);
+  try {
+    return { result, payload: JSON.parse(result.stdout) };
+  } catch (error) {
+    throw new Error(`Command did not return JSON: ${command} ${args.join(" ")}\n${result.stdout}\n${error}`);
+  }
+}
+
+/** Writes one consumer repository whose durable and integration bytes must survive a round trip. */
+function writeConsumer(root, label, options = {}) {
+  fs.mkdirSync(path.join(root, "memory"), { recursive: true });
+  fs.mkdirSync(path.join(root, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(root, "README.md"), `# ${label}\n\nAtlas uninstall fixture.\n`);
+  fs.writeFileSync(path.join(root, "memory", "CURRENT.md"), `# Memory\n\n${label} durable knowledge.\n`);
+  fs.writeFileSync(path.join(root, "docs", "ARCHITECTURE.md"), "# Architecture\n\nConsumer sources remain authoritative.\n");
+  if (options.existingIntegrations) {
+    fs.writeFileSync(path.join(root, "AGENTS.md"), "# Consumer Rules\n\nRun the consumer route first.\n");
+    fs.writeFileSync(path.join(root, ".gitignore"), "coverage/\n");
+  }
+}
+
+/** Computes a stable content-tree digest without treating file timestamps as product behavior. */
+function treeDigest(root) {
+  const rows = [];
+  /** Walks sorted fixture entries and records symbolic-link targets or exact file-byte digests. */
+  const walk = (directory) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+      const absolute = path.join(directory, entry.name);
+      const relative = path.relative(root, absolute).replaceAll(path.sep, "/");
+      if (entry.isSymbolicLink()) rows.push(`${relative}\0link\0${fs.readlinkSync(absolute)}`);
+      else if (entry.isDirectory()) walk(absolute);
+      else rows.push(`${relative}\0file\0${crypto.createHash("sha256").update(fs.readFileSync(absolute)).digest("hex")}`);
+    }
+  };
+  walk(root);
+  return crypto.createHash("sha256").update(rows.join("\n")).digest("hex");
+}
+
+const workRootValue = argValue("--work-root");
+const graphSourceValue = argValue("--graph-source");
+check(workRootValue && path.isAbsolute(workRootValue), "--work-root must be an absolute registered technical-space path");
+check(graphSourceValue, "--graph-source is required");
+const workRoot = path.resolve(workRootValue);
+const atlasSource = path.resolve(argValue("--atlas-source", path.resolve(import.meta.dirname, "..")));
+const graphSource = path.resolve(graphSourceValue);
+const exactRoot = path.join(workRoot, "exact-round-trip");
+const unknownRoot = path.join(workRoot, "unknown-content");
+const externalRoot = path.join(workRoot, "external-exchange");
+const recoveryRoot = path.join(workRoot, "damaged-lock-recovery");
+const verifiedCustomRoot = path.join(workRoot, "verified-custom-path");
+const unprovenRoot = path.join(workRoot, "unproven-custom-path");
+const sourceUninstall = path.join(atlasSource, "scripts", "atlas-uninstall");
+
+fs.rmSync(workRoot, { recursive: true, force: true });
+fs.mkdirSync(workRoot, { recursive: true });
+
+/** Runs the public high-level initializer for one arbitrary repository fixture. */
+function initialize(root, repositoryId) {
+  return runJson(process.execPath, [
+    path.join(atlasSource, "scripts", "atlas-init"),
+    "--repo", root,
+    "--repository-id", repositoryId,
+    "--include", "README.md",
+    "--include", "memory",
+    "--include", "docs",
+    "--atlas-source", atlasSource,
+    "--graph-source", graphSource,
+    "--allow-source-changes",
+    "--json",
+  ], { cwd: atlasSource }).payload;
+}
+
+writeConsumer(exactRoot, "Exact Round Trip", { existingIntegrations: true });
+const exactBefore = treeDigest(exactRoot);
+const exactInit = initialize(exactRoot, "exact-round-trip");
+check(exactInit.status === "pass", "exact round-trip initialization failed");
+const exactLock = JSON.parse(fs.readFileSync(path.join(exactRoot, ".atlas", "atlas.lock.json"), "utf8"));
+check(exactLock.schema === ATLAS_INSTALLATION_LOCK_SCHEMA, "initializer did not write the current lock schema");
+check(exactLock.repositoryIntegration?.schema === ATLAS_REPOSITORY_INTEGRATION_SCHEMA, "initializer omitted the reversible integration receipt");
+check(fs.readFileSync(path.join(exactRoot, ".gitignore"), "utf8").includes(ATLAS_IGNORE_BEGIN), "initializer did not install managed ignore markers");
+const exactCommand = path.join(exactRoot, ".atlas", "bin", "atlas");
+const preview = runJson(exactCommand, ["uninstall", "--dry-run", "--json"], { cwd: exactRoot }).payload;
+check(preview.status === "ready" && preview.removalPaths.includes(".atlas/runtime"), "installed uninstall preview omitted runtime ownership");
+
+const syncFixture = path.join(exactRoot, ".atlas", "state", "environment-sync-exchange", "fixture", "revision.json");
+fs.mkdirSync(path.dirname(syncFixture), { recursive: true });
+fs.writeFileSync(syncFixture, "{}\n");
+const installedDigest = treeDigest(exactRoot);
+const localExchangeEnv = { ATLAS_SYNC_EXCHANGE_ROOT: path.dirname(path.dirname(syncFixture)) };
+const blocked = runJson(exactCommand, ["uninstall", "--yes", "--json"], { cwd: exactRoot, env: localExchangeEnv, allowedStatus: [2] }).payload;
+check(blocked.status === "blocked" && blocked.blockers.some((row) => row.code === "sync-exchange-not-empty"), "non-empty local sync history did not block uninstall");
+check(treeDigest(exactRoot) === installedDigest, "blocked uninstall mutated the repository");
+
+const uninstalled = runJson(exactCommand, ["uninstall", "--delete-sync-exchange", "--yes", "--json"], { cwd: exactRoot, env: localExchangeEnv }).payload;
+check(uninstalled.status === "uninstalled" && uninstalled.atlasRootRemoved, "explicit sync-discard uninstall did not remove the Atlas control plane");
+check(treeDigest(exactRoot) === exactBefore, "fresh install/uninstall did not restore the exact consumer tree");
+const absent = runJson(process.execPath, [sourceUninstall, "--repo", exactRoot, "--yes", "--json"], { cwd: atlasSource }).payload;
+check(absent.status === "already-absent", "second uninstall was not idempotent");
+
+writeConsumer(unknownRoot, "Unknown Content");
+initialize(unknownRoot, "unknown-content");
+fs.writeFileSync(path.join(unknownRoot, ".atlas", "consumer-note.txt"), "preserve me\n");
+const unknownCommand = path.join(unknownRoot, ".atlas", "bin", "atlas");
+const unknownBlocked = runJson(unknownCommand, ["uninstall", "--yes", "--json"], { cwd: unknownRoot, allowedStatus: [2] }).payload;
+check(unknownBlocked.blockers.some((row) => row.code === "unknown-atlas-content"), "unknown .atlas content did not block cleanup");
+check(fs.existsSync(path.join(unknownRoot, ".atlas", "consumer-note.txt")), "unknown .atlas content was removed");
+
+writeConsumer(externalRoot, "External Exchange");
+const externalBefore = treeDigest(externalRoot);
+initialize(externalRoot, "external-exchange");
+const externalInstancePath = path.join(externalRoot, ".atlas", "atlas.instance.json");
+const externalInstance = JSON.parse(fs.readFileSync(externalInstancePath, "utf8"));
+externalInstance.sync.exchangePath = "atlas-sync-exchange";
+fs.writeFileSync(externalInstancePath, `${JSON.stringify(externalInstance, null, 2)}\n`);
+fs.mkdirSync(path.join(externalRoot, "atlas-sync-exchange"), { recursive: true });
+fs.writeFileSync(path.join(externalRoot, "atlas-sync-exchange", "revision.json"), "{}\n");
+const externalCommand = path.join(externalRoot, ".atlas", "bin", "atlas");
+const externalResult = runJson(externalCommand, ["uninstall", "--yes", "--json"], { cwd: externalRoot }).payload;
+check(externalResult.status === "uninstalled" && externalResult.preserved.some((row) => row.path === "atlas-sync-exchange"), "external sync exchange was not reported as preserved");
+check(fs.existsSync(path.join(externalRoot, "atlas-sync-exchange", "revision.json")), "external sync exchange was deleted");
+fs.rmSync(path.join(externalRoot, "atlas-sync-exchange"), { recursive: true });
+check(treeDigest(externalRoot) === externalBefore, "external-exchange uninstall changed consumer source bytes");
+
+writeConsumer(recoveryRoot, "Damaged Lock Recovery");
+initialize(recoveryRoot, "damaged-lock-recovery");
+fs.rmSync(path.join(recoveryRoot, ".atlas", "atlas.lock.json"));
+const recovered = runJson(process.execPath, [sourceUninstall, "--repo", recoveryRoot, "--yes", "--json"], { cwd: atlasSource }).payload;
+check(recovered.status === "uninstalled" && !fs.existsSync(path.join(recoveryRoot, ".atlas")), "distribution-side recovery did not remove a standard installation with a missing lock");
+
+writeConsumer(verifiedCustomRoot, "Verified Custom Path");
+initialize(verifiedCustomRoot, "verified-custom-path");
+const verifiedManifestPath = path.join(verifiedCustomRoot, ".atlas", "atlas.install.json");
+const verifiedLockPath = path.join(verifiedCustomRoot, ".atlas", "atlas.lock.json");
+const verifiedManifest = JSON.parse(fs.readFileSync(verifiedManifestPath, "utf8"));
+const verifiedLock = JSON.parse(fs.readFileSync(verifiedLockPath, "utf8"));
+fs.renameSync(path.join(verifiedCustomRoot, ".atlas", "runtime"), path.join(verifiedCustomRoot, "atlas-runtime"));
+verifiedManifest.runtimePath = "atlas-runtime";
+verifiedLock.runtimePath = "atlas-runtime";
+fs.writeFileSync(verifiedManifestPath, `${JSON.stringify(verifiedManifest, null, 2)}\n`);
+fs.writeFileSync(verifiedLockPath, `${JSON.stringify(verifiedLock, null, 2)}\n`);
+fs.writeFileSync(path.join(verifiedCustomRoot, "atlas-runtime", "consumer-note.txt"), "consumer byte beside a valid locked payload\n");
+const verifiedCustom = runJson(process.execPath, [sourceUninstall, "--repo", verifiedCustomRoot, "--yes", "--json"], { cwd: atlasSource, allowedStatus: [2] }).payload;
+check(verifiedCustom.blockers.some((row) => row.code === "custom-layout-requires-manual-removal"), "verified custom runtime layout did not block automatic uninstall");
+check(fs.existsSync(path.join(verifiedCustomRoot, "atlas-runtime", "consumer-note.txt")), "consumer content inside a verified custom runtime path was deleted");
+
+writeConsumer(unprovenRoot, "Unproven Custom Path");
+fs.mkdirSync(path.join(unprovenRoot, ".atlas"), { recursive: true });
+fs.writeFileSync(path.join(unprovenRoot, ".atlas", "atlas.install.json"), `${JSON.stringify({
+  schema: "multihead-atlas.installation_manifest.v1",
+  installationId: "unproven-custom-path",
+  scope: "repository",
+  runtimePath: "docs",
+  statePath: ".atlas/state",
+  packages: {
+    atlas: { version: "0.6.0" },
+    graph: { version: "0.6.3" },
+  },
+}, null, 2)}\n`);
+fs.writeFileSync(path.join(unprovenRoot, ".atlas", "atlas.lock.json"), `${JSON.stringify({
+  schema: ATLAS_INSTALLATION_LOCK_SCHEMA,
+  installationId: "unproven-custom-path",
+  scope: "repository",
+  runtimePath: "docs",
+  statePath: ".atlas/state",
+  packages: {},
+  contracts: {},
+  repositoryIntegration: null,
+}, null, 2)}\n`);
+const unproven = runJson(process.execPath, [sourceUninstall, "--repo", unprovenRoot, "--yes", "--json"], { cwd: atlasSource, allowedStatus: [2] }).payload;
+check(unproven.blockers.some((row) => row.code === "custom-layout-requires-manual-removal"), "custom runtime layout did not block automatic uninstall");
+check(fs.existsSync(path.join(unprovenRoot, "docs", "ARCHITECTURE.md")), "unverified custom runtime path deleted consumer sources");
+
+console.log(JSON.stringify({
+  schema: "multihead-atlas.uninstall_contract_test.v1",
+  status: "pass",
+  metrics: {
+    exactRoundTrips: 1,
+    syncHistoryRefusals: 1,
+    explicitSyncDiscards: 1,
+    unknownContentRefusals: 1,
+    externalExchangesPreserved: 1,
+    damagedLockRecoveries: 1,
+    verifiedCustomPathRefusals: 1,
+    unprovenCustomPathRefusals: 1,
+    idempotentUninstalls: 1,
+  },
+}, null, 2));

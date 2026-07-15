@@ -1,0 +1,228 @@
+#!/usr/bin/env node
+
+/*
+ * Atlas Graph is the installed runtime launcher. The consumer repository owns
+ * the provider command and data; this launcher verifies the pinned runtime,
+ * starts that configured provider, then runs the installed Graph lens against
+ * it. Existing providers are reused only through an explicit --provider-url;
+ * a coincidentally healthy local port is not instance identity. A newly
+ * launched Graph must also echo an identity bound to the installation, exact
+ * Graph package, and provider URL. The launcher never discovers repository
+ * memory or catalog sources.
+ */
+
+import childProcess from "node:child_process";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { verifyAtlasInstallation } from "../product/installation-contract.mjs";
+
+/** Reads one launcher option from separated or equals-prefixed argument syntax. */
+function argValue(name, fallback = "") {
+  const exact = process.argv.indexOf(name);
+  if (exact >= 0) return process.argv[exact + 1] || fallback;
+  const prefixed = process.argv.find((arg) => arg.startsWith(`${name}=`));
+  return prefixed ? prefixed.slice(name.length + 1) : fallback;
+}
+
+/** Checks whether an exact launcher flag is present in the invocation. */
+function enabled(name) {
+  return process.argv.includes(name);
+}
+
+/** Prints the two explicit provider-binding modes supported by the Graph launcher. */
+function usage() {
+  console.log(`Usage:
+  atlas-graph --root PATH --provider-command PATH [--provider-port N] [--graph-port N] [--room ID] [--open] [--smoke]
+  atlas-graph --root PATH --provider-url URL [--graph-port N] [--room ID] [--open] [--smoke]
+
+The installed runtime supplies Atlas verification and the Graph lens. The
+consumer supplies a repository-owned provider command or an existing provider
+URL explicitly. ATLAS_PROVIDER_PORT is passed to provider commands;
+--provider-port-env adds a compatibility environment variable.`);
+}
+
+/** Checks whether a local TCP port is free for a newly bound provider or Graph process. */
+function portAvailable(port) {
+  const result = childProcess.spawnSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"], {
+    encoding: "utf8",
+    stdio: ["ignore", "ignore", "ignore"],
+  });
+  return result.status !== 0;
+}
+
+/** Finds the first available TCP port at or above the requested starting value. */
+function nextFreePort(start) {
+  let port = Number(start);
+  while (port < 65536 && !portAvailable(port)) port += 1;
+  if (port >= 65536) throw new Error(`No free TCP port available from ${start}`);
+  return port;
+}
+
+/** Verifies that a provider serves at least one repository-owned Atlas room. */
+async function providerReady(baseUrl) {
+  try {
+    const response = await fetch(`${baseUrl}/api/architecture-slices?query=architecture`);
+    if (!response.ok) return false;
+    const payload = await response.json();
+    return Array.isArray(payload?.atlas?.rooms) && payload.atlas.rooms.length > 0;
+  } catch (_error) {
+    return false;
+  }
+}
+
+/**
+ * Derives the non-secret response identity that binds the served lens to this
+ * verified installation, exact Graph payload, and selected provider endpoint.
+ */
+function graphRuntimeIdentity(verification, providerUrl) {
+  const graphDigest = verification.packages?.graph?.digest || "";
+  if (!graphDigest) throw new Error("Atlas Graph verification omitted the installed Graph package digest");
+  return crypto.createHash("sha256").update([
+    "multihead-atlas.graph-runtime-identity.v1",
+    verification.installationId,
+    graphDigest,
+    providerUrl,
+  ].join("\n")).digest("hex");
+}
+
+/** Verifies the application shell and exact launch identity returned by Graph. */
+async function graphReady(baseUrl, expectedIdentity) {
+  try {
+    const response = await fetch(`${baseUrl}/`);
+    if (!response.ok) return false;
+    if (response.headers.get("x-atlas-graph-runtime-identity") !== expectedIdentity) return false;
+    const html = await response.text();
+    return html.includes("<title>Atlas</title>") && html.includes("memory-graph-root");
+  } catch (_error) {
+    return false;
+  }
+}
+
+/** Polls a bounded readiness check and reports the relevant process log on timeout. */
+async function waitFor(label, check, logPath) {
+  for (let attempt = 0; attempt < 90; attempt += 1) {
+    if (await check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  const suffix = fs.existsSync(logPath) ? `; inspect ${logPath}` : "";
+  throw new Error(`${label} did not become ready${suffix}`);
+}
+
+/** Starts one child process with stdout and stderr appended to its instance-local log. */
+function spawnLogged(command, args, options, logPath) {
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  const log = fs.openSync(logPath, "a");
+  return childProcess.spawn(command, args, {
+    ...options,
+    stdio: ["ignore", log, log],
+  });
+}
+
+if (enabled("--help") || enabled("-h")) {
+  usage();
+  process.exit(0);
+}
+
+const root = path.resolve(argValue("--root", process.cwd()));
+const manifestPath = path.resolve(argValue("--manifest", path.join(root, ".atlas", "atlas.install.json")));
+const verification = verifyAtlasInstallation({ root, manifestPath });
+if (verification.status !== "pass") throw new Error("Atlas installation verification failed");
+
+const runtimeRoot = verification.runtimeRoot;
+const graphRoot = path.join(runtimeRoot, "graph");
+const providerCommand = argValue("--provider-command");
+const requestedProviderUrl = argValue("--provider-url");
+const providerPortEnv = argValue("--provider-port-env");
+let providerPort = Number(argValue("--provider-port", "8765"));
+let graphPort = Number(argValue("--graph-port", "8910"));
+const roomId = argValue("--room").trim().toUpperCase();
+const logRoot = path.join(verification.stateRoot, "graph-launcher");
+const children = [];
+
+if (!requestedProviderUrl && !providerCommand) {
+  throw new Error("Atlas graph requires --provider-command or --provider-url");
+}
+if (!fs.existsSync(path.join(graphRoot, "package.json"))) {
+  throw new Error(`Installed Memory Graph runtime is missing: ${graphRoot}`);
+}
+
+let providerUrl = requestedProviderUrl.replace(/\/$/u, "");
+if (providerUrl) {
+  if (!(await providerReady(providerUrl))) {
+    throw new Error(`Atlas provider URL is not ready: ${providerUrl}`);
+  }
+} else {
+  providerUrl = `http://127.0.0.1:${providerPort}`;
+  // A provider command names this Atlas Instance's authority. Never accept a
+  // health-compatible process already on the port as proof of that identity.
+  if (!portAvailable(providerPort)) {
+    providerPort = nextFreePort(providerPort + 1);
+    providerUrl = `http://127.0.0.1:${providerPort}`;
+  }
+  const providerLog = path.join(logRoot, `provider-${providerPort}.log`);
+  const providerEnv = { ...process.env, ATLAS_PROVIDER_PORT: String(providerPort) };
+  if (providerPortEnv) providerEnv[providerPortEnv] = String(providerPort);
+  const provider = spawnLogged(path.resolve(root, providerCommand), [], {
+    cwd: root,
+    env: providerEnv,
+  }, providerLog);
+  children.push(provider);
+  await waitFor("Atlas repository provider", () => providerReady(providerUrl), providerLog);
+}
+
+const expectedGraphIdentity = graphRuntimeIdentity(verification, providerUrl);
+let graphUrl = `http://127.0.0.1:${graphPort}`;
+// A running Graph server is already bound to its launch-time provider URL, so
+// it is not safe to reuse through an occupied port. Strict binding also keeps
+// Vite from silently moving away from the port this launcher reports.
+if (!portAvailable(graphPort)) {
+  graphPort = nextFreePort(graphPort + 1);
+  graphUrl = `http://127.0.0.1:${graphPort}`;
+}
+const graphLog = path.join(logRoot, `graph-${graphPort}.log`);
+const graph = spawnLogged("npm", ["run", "dev", "--", "--host", "127.0.0.1", "--port", String(graphPort), "--strictPort"], {
+  cwd: graphRoot,
+  env: {
+    ...process.env,
+    MH_ATLAS_BASE_URL: providerUrl,
+    MH_ATLAS_GRAPH_RUNTIME_IDENTITY: expectedGraphIdentity,
+  },
+}, graphLog);
+children.push(graph);
+await waitFor("Memory Graph lens", () => graphReady(graphUrl, expectedGraphIdentity), graphLog);
+
+const openUrl = roomId
+  ? `${graphUrl}/#architecture/room/${encodeURIComponent(roomId)}`
+  : `${graphUrl}/#architecture`;
+console.log(`Atlas provider: ${providerUrl}/`);
+console.log(`Memory Graph: ${openUrl}`);
+console.log(`Logs: ${logRoot}`);
+
+/** Stops every provider and Graph child process started by this launcher invocation. */
+const cleanup = () => {
+  for (const child of children) {
+    if (!child.killed) child.kill("SIGTERM");
+  }
+};
+process.once("SIGINT", () => {
+  cleanup();
+  process.exit(130);
+});
+process.once("SIGTERM", () => {
+  cleanup();
+  process.exit(143);
+});
+
+if (enabled("--open")) {
+  childProcess.spawn("open", [openUrl], { detached: true, stdio: "ignore" }).unref();
+}
+if (enabled("--smoke")) {
+  cleanup();
+  console.log("smoke: pass");
+  process.exit(0);
+}
+if (children.length) {
+  await Promise.race(children.map((child) => new Promise((resolve) => child.once("exit", resolve))));
+  cleanup();
+}

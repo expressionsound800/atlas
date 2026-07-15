@@ -1,0 +1,1414 @@
+/*
+ * The Graph stylesheet defines the standalone lens typography, structural
+ * layout, SVG/DOM states, controls, overlays, and responsive presentation.
+ */
+@font-face {
+  font-family: "Roboto Flex Local";
+  src: url("./assets/fonts/RobotoFlex-VariableFont_GRAD,XOPQ,XTRA,YOPQ,YTAS,YTDE,YTFI,YTLC,YTUC,opsz,slnt,wdth,wght.ttf") format("truetype");
+  font-display: swap;
+  font-style: normal;
+  font-weight: 100 1000;
+}
+
+@font-face {
+  font-family: "Roboto Local";
+  src: url("./assets/fonts/Roboto-VariableFont_wdth,wght.ttf") format("truetype");
+  font-display: swap;
+  font-style: normal;
+  font-weight: 100 900;
+}
+
+@font-face {
+  font-family: "Roboto Local";
+  src: url("./assets/fonts/Roboto-Italic-VariableFont_wdth,wght.ttf") format("truetype");
+  font-display: swap;
+  font-style: italic;
+  font-weight: 100 900;
+}
+
+:root {
+  --font-main: "Roboto Flex Local", "Roboto Local", sans-serif;
+  --color-page: #ffffff;
+  --color-text: #242424;
+  --color-background-text: #b8b8b8;
+  /* Pale lime fills state surfaces; the darker lime keeps thin graph strokes
+     legible without turning labels into low-contrast highlight paint. */
+  --workspace-graph-active-chain-background: #E9F888;
+  --workspace-graph-active-chain-stroke: #D4E851;
+  --workspace-graph-active-chain-border: var(--workspace-graph-active-chain-stroke);
+
+  --type-meta: 11px;
+  --type-tab-family: var(--font-main);
+  --type-tab-size: 13px;
+  --type-tab-line: 18px;
+  --type-tab-letter: -0.01em;
+
+  --chip-background: var(--color-page);
+  --chip-text: var(--color-text);
+  --chip-border-width: 1px;
+  --chip-border-radius: 999px;
+  --chip-border-color: var(--color-text);
+  --chip-selected-text: var(--color-text);
+
+  --workspace-graph-edge-stroke: var(--color-text);
+  --workspace-graph-control-edge-stroke: var(--color-text);
+  --workspace-graph-timing-edge-stroke: var(--color-text);
+  --workspace-graph-binding-edge-stroke: var(--color-text);
+  --workspace-graph-tempo-edge-stroke: var(--color-text);
+  --workspace-graph-disabled-edge-stroke: var(--color-text);
+  --workspace-graph-selected-edge-stroke: #3F70FF;
+  --workspace-graph-active-edge-stroke: var(--workspace-graph-active-chain-stroke);
+  --workspace-graph-node-selected-background: var(--workspace-graph-active-chain-background);
+  --workspace-graph-selected-node-border: var(--color-text);
+  --workspace-graph-selected-node-outline: var(--color-text);
+  --workspace-graph-active-selected-background: transparent;
+  --workspace-graph-label-text: #5F5F5F;
+  --workspace-graph-label-muted-text: #7A7A7A;
+  --workspace-graph-label-disabled-text: #949494;
+  --workspace-graph-label-selected-text: #1F4FFF;
+  --workspace-graph-connector-fill: var(--color-page);
+  --workspace-graph-connector-ring: var(--color-text);
+  --workspace-graph-selected-connector-ring: var(--color-text);
+  --workspace-graph-control-connector-ring: var(--color-text);
+  --workspace-graph-active-connector-ring: var(--color-text);
+  --workspace-graph-drilldown-marker-background: var(--chip-background);
+  --workspace-graph-drilldown-marker-border: var(--color-text);
+  --workspace-graph-empty-text: rgba(36, 36, 36, 0.58);
+}
+
+/* Safari uses the bundled static Roboto variable face because its Roboto Flex
+   metrics and rendering are not reliable. The document marker is set before
+   this stylesheet loads, so flex centering sees one stable font from first paint. */
+:root[data-browser="safari"] {
+  --font-main: "Roboto Local", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  /* Keep Chrome's window surface from appearing below the white application
+     plane when a trackpad gesture reaches either viewport boundary. */
+  overscroll-behavior: none;
+  background: var(--color-page);
+}
+
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: var(--color-page);
+  color: var(--color-text);
+  font-family: var(--font-main);
+  font-size: 14px;
+  line-height: 20px;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.page-shell,
+.memory-graph-root,
+.workspace-graph-root {
+  min-width: 0;
+  min-height: 0;
+  inline-size: 100%;
+  min-block-size: 100vh;
+}
+
+.page-shell {
+  display: block;
+  width: 100%;
+  min-height: 100vh;
+}
+
+.memory-graph-root {
+  position: relative;
+  min-height: 100vh;
+  background: transparent;
+}
+
+.workspace-graph-root {
+  display: block;
+  block-size: 100vh;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.graph-presentation-toggle {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 20;
+  display: inline-flex;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-text);
+  border-radius: 999px;
+  background: var(--color-page);
+}
+
+.graph-source-toggle {
+  position: fixed;
+  top: 14px;
+  right: 190px;
+  z-index: 20;
+  display: inline-flex;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-text);
+  border-radius: 999px;
+  background: var(--color-page);
+}
+
+.graph-source-toggle-button {
+  appearance: none;
+  min-width: 86px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-right: 1px solid var(--color-text);
+  background: transparent;
+  color: var(--color-text);
+  font-family: var(--type-tab-family);
+  font-size: 11px;
+  font-weight: 560;
+  letter-spacing: 0;
+  line-height: 28px;
+  cursor: pointer;
+}
+
+.graph-source-toggle-button:last-child {
+  border-right: 0;
+}
+
+.graph-source-toggle-button.is-active {
+  background: var(--workspace-graph-active-chain-background);
+}
+
+.graph-presentation-toggle-button {
+  appearance: none;
+  min-width: 78px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-right: 1px solid var(--color-text);
+  background: transparent;
+  color: var(--color-text);
+  font-family: var(--type-tab-family);
+  font-size: 11px;
+  font-weight: 560;
+  letter-spacing: 0;
+  line-height: 28px;
+  cursor: pointer;
+}
+
+.graph-presentation-toggle-button:last-child {
+  border-right: 0;
+}
+
+.graph-presentation-toggle-button.is-active {
+  background: var(--workspace-graph-active-chain-background);
+}
+
+.graph-surface-toolbar {
+  position: fixed;
+  right: 50%;
+  bottom: 16px;
+  z-index: 20;
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--color-text);
+  border-radius: 8px;
+  background: var(--color-page);
+  transform: translateX(50%);
+}
+
+.graph-surface-tool {
+  appearance: none;
+  min-width: 42px;
+  height: 30px;
+  padding: 0 11px;
+  border: 0;
+  border-right: 1px solid var(--color-text);
+  background: transparent;
+  color: var(--color-text);
+  font-family: var(--type-tab-family);
+  font-size: 11px;
+  font-weight: 560;
+  letter-spacing: 0;
+  line-height: 30px;
+  cursor: pointer;
+}
+
+.graph-surface-tool:last-child,
+.graph-surface-tool.is-last-visible {
+  border-right: 0;
+}
+
+.graph-surface-tool:hover,
+.graph-surface-tool.is-active {
+  background: var(--workspace-graph-active-chain-background);
+}
+
+.graph-surface-tool:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.graph-info-overlay {
+  position: fixed;
+  right: 18px;
+  bottom: 60px;
+  z-index: 21;
+  width: min(360px, calc(100vw - 36px));
+  max-height: min(460px, calc(100vh - 96px));
+  overflow: auto;
+  padding: 14px 15px 15px;
+  border: 1px solid rgba(36, 36, 36, 0.56);
+  border-radius: 8px;
+  background: var(--color-page);
+  color: var(--color-text);
+  box-shadow: 0 16px 40px rgba(36, 36, 36, 0.12);
+}
+
+.graph-status-panel {
+  position: fixed;
+  left: 22px;
+  bottom: 52px;
+  z-index: 21;
+  width: min(420px, calc(100vw - 44px));
+  max-height: min(440px, calc(100vh - 94px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid rgba(36, 36, 36, 0.28);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--color-text);
+  box-shadow: 0 18px 48px rgba(36, 36, 36, 0.13);
+  backdrop-filter: blur(8px);
+}
+
+.graph-status-panel.has-document-viewer {
+  width: min(760px, calc(100vw - 44px));
+}
+
+.graph-status-panel.is-collapsed {
+  width: min(220px, calc(100vw - 44px));
+  max-height: none;
+  overflow: visible;
+  padding: 10px 12px 11px;
+}
+
+.graph-status-panel.is-collapsed .graph-info-header {
+  margin-bottom: 4px;
+}
+
+.graph-floating-panel {
+  resize: none;
+}
+
+.graph-info-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 0;
+  padding: 12px 14px 10px;
+  cursor: grab;
+  user-select: none;
+}
+
+.graph-info-header:active {
+  cursor: grabbing;
+}
+
+.graph-info-header h2 {
+  margin: 0;
+  color: var(--color-text);
+  font-family: var(--type-tab-family);
+  font-size: 13px;
+  font-weight: 660;
+  letter-spacing: 0;
+  line-height: 16px;
+}
+
+.graph-info-close {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font-family: var(--type-tab-family);
+  font-size: 11px;
+  font-weight: 560;
+  letter-spacing: 0;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.graph-info-list {
+  display: grid;
+  grid-template-columns: minmax(78px, max-content) minmax(0, 1fr);
+  gap: 7px 12px;
+  margin: 0;
+  color: var(--color-text);
+  font-family: var(--type-tab-family);
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.graph-info-list dt {
+  color: var(--workspace-graph-label-muted-text);
+  font-weight: 620;
+  text-transform: uppercase;
+}
+
+.graph-info-list dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-weight: 500;
+}
+
+.graph-status-body {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0 14px 14px;
+  overflow: auto;
+  color: var(--color-text);
+  font-family: var(--type-tab-family);
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.graph-router-panel-content {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 0;
+  overflow: hidden;
+}
+
+.graph-status-panel.has-document-viewer .graph-router-panel-content {
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.92fr);
+}
+
+.graph-router-footer {
+  min-width: 0;
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px 10px;
+  border-top: 1px solid rgba(36, 36, 36, 0.18);
+  background: rgba(255, 255, 255, 0.38);
+}
+
+.graph-router-footer[hidden] {
+  display: none;
+}
+
+.graph-router-actions {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 12px;
+}
+
+.graph-router-actions-left,
+.graph-router-actions-right {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.graph-router-actions-right {
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.graph-router-action {
+  appearance: none;
+  min-height: 22px;
+  padding: 2px 10px;
+  border: 1px solid rgba(36, 36, 36, 0.42);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text);
+  font-family: var(--type-tab-family);
+  font-size: 11px;
+  font-weight: 620;
+  letter-spacing: 0;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.graph-router-action:hover {
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.graph-router-document {
+  min-width: 0;
+  min-height: 0;
+  display: none;
+  grid-template-rows: auto minmax(0, 1fr);
+  border-left: 1px solid rgba(36, 36, 36, 0.18);
+  background: rgba(255, 255, 255, 0.48);
+  overflow: hidden;
+}
+
+.graph-router-document.is-open {
+  display: grid;
+}
+
+.graph-router-document-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  border-bottom: 1px solid rgba(36, 36, 36, 0.16);
+}
+
+.graph-router-document-header h3 {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--color-text);
+  font-family: var(--type-tab-family);
+  font-size: 12px;
+  font-weight: 660;
+  letter-spacing: 0;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-router-document-body {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  color: var(--color-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  line-height: 14px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.graph-status-selected {
+  display: grid;
+  gap: 8px;
+}
+
+.graph-status-selected h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 680;
+  line-height: 16px;
+}
+
+.graph-status-selected-body {
+  margin: 0;
+  padding-left: 9px;
+  border-left: 3px solid var(--workspace-graph-active-chain-background);
+  font-size: 12px;
+  font-weight: 540;
+  line-height: 15px;
+}
+
+.graph-status-details {
+  display: grid;
+  grid-template-columns: minmax(70px, max-content) minmax(0, 1fr);
+  gap: 5px 10px;
+  margin: 0;
+}
+
+.graph-status-details dt {
+  color: rgba(36, 36, 36, 0.58);
+  font-weight: 620;
+}
+
+.graph-status-details dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-weight: 470;
+}
+
+.graph-atlas-route-trail,
+.graph-atlas-route-candidates {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.graph-atlas-route-trail strong,
+.graph-atlas-route-candidates-title {
+  color: rgba(36, 36, 36, 0.58);
+  font-size: 10px;
+  font-weight: 680;
+  line-height: 13px;
+  text-transform: uppercase;
+}
+
+.graph-atlas-route-trail span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 540;
+}
+
+.graph-atlas-route-candidate-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.graph-atlas-route-candidate {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid rgba(36, 36, 36, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.graph-atlas-route-candidate.is-selected {
+  border-color: rgba(36, 36, 36, 0.38);
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.graph-atlas-route-candidate-header {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  min-width: 0;
+  font-weight: 650;
+}
+
+.graph-atlas-route-candidate-header span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-atlas-route-candidate-header span:last-child {
+  flex: 0 0 auto;
+  color: rgba(36, 36, 36, 0.62);
+  font-size: 10px;
+  font-weight: 620;
+}
+
+.graph-atlas-route-candidate p {
+  margin: 0;
+  color: rgba(36, 36, 36, 0.72);
+  font-size: 10px;
+  line-height: 13px;
+  overflow-wrap: anywhere;
+}
+
+.graph-status-summary {
+  padding-left: 9px;
+  border-left: 3px solid var(--workspace-graph-active-chain-stroke);
+  font-weight: 600;
+}
+
+.graph-status-summary-collapsed {
+  opacity: 0.78;
+}
+
+.graph-status-gates {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.graph-status-gate {
+  display: grid;
+  gap: 3px;
+  padding-left: 9px;
+  border-left: 2px solid rgba(36, 36, 36, 0.22);
+}
+
+.graph-status-gate[data-status="missing"] {
+  border-left-color: #ff7a5c;
+}
+
+.graph-status-gate[data-status="attention"] {
+  border-left-color: var(--workspace-graph-active-chain-stroke);
+}
+
+.graph-status-gate strong,
+.graph-status-gate span {
+  display: block;
+}
+
+.graph-status-gate strong {
+  font-size: 11px;
+  font-weight: 660;
+}
+
+.graph-status-gate span {
+  font-weight: 470;
+}
+
+.workspace-graph-shell {
+  position: relative;
+  display: block;
+  min-width: 100%;
+  block-size: 100%;
+  min-height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+.workspace-graph-canvas {
+  position: relative;
+  min-width: 100%;
+  block-size: 100%;
+  min-height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.workspace-graph-content-stage {
+  position: relative;
+  min-inline-size: 100%;
+  min-block-size: 100%;
+  overflow: visible;
+}
+
+.workspace-graph-content {
+  position: absolute;
+  left: 0;
+  top: 0;
+  min-inline-size: 100%;
+  min-block-size: 100%;
+  transform-origin: 0 0;
+}
+
+.workspace-graph-edges,
+.workspace-graph-arrows,
+.workspace-graph-edge-labels,
+.workspace-graph-containers,
+.workspace-graph-grid,
+.workspace-graph-nodes {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+}
+
+.workspace-graph-grid {
+  z-index: 0;
+  pointer-events: none;
+}
+
+.workspace-graph-containers {
+  z-index: 1;
+  pointer-events: none;
+}
+
+.workspace-graph-edges {
+  z-index: 2;
+  pointer-events: none;
+}
+
+.workspace-graph-edge-labels {
+  z-index: 3;
+  pointer-events: none;
+}
+
+.workspace-graph-nodes {
+  z-index: 4;
+  pointer-events: none;
+}
+
+.workspace-graph-arrows {
+  z-index: 5;
+  pointer-events: none;
+}
+
+.workspace-graph-root.is-focus-mode .workspace-graph-grid {
+  opacity: 0.18;
+}
+
+.workspace-graph-root.is-focus-mode .workspace-graph-container {
+  opacity: 0.22;
+}
+
+.workspace-graph-root.is-focus-mode .workspace-graph-edge:not(.is-active-chain),
+.workspace-graph-root.is-focus-mode .workspace-graph-edge-arrowhead:not(.is-active-chain),
+.workspace-graph-root.is-focus-mode .workspace-graph-edge-label:not(.is-active-chain),
+.workspace-graph-root.is-focus-mode .workspace-graph-node:not(.is-active-chain):not(.is-selected) {
+  opacity: 0.13;
+}
+
+.workspace-graph-root.is-focus-mode .workspace-graph-node.is-active-chain,
+.workspace-graph-root.is-focus-mode .workspace-graph-edge.is-active-chain,
+.workspace-graph-root.is-focus-mode .workspace-graph-edge-arrowhead.is-active-chain,
+.workspace-graph-root.is-focus-mode .workspace-graph-edge-label.is-active-chain {
+  opacity: 1;
+}
+
+.workspace-graph-root.has-signal-flow:not(.is-focus-mode) .workspace-graph-edge.is-active-chain,
+.workspace-graph-root.has-signal-flow:not(.is-focus-mode) .workspace-graph-edge-arrowhead.is-active-chain,
+.workspace-graph-root.has-signal-flow:not(.is-focus-mode) .workspace-graph-edge-label.is-active-chain {
+  opacity: 1;
+}
+
+.workspace-graph-grid-lines {
+  fill: none;
+  stroke: rgba(36, 36, 36, 0.12);
+  stroke-width: 0.7;
+}
+
+.workspace-graph-grid-bounds {
+  fill: none;
+  stroke: rgba(36, 36, 36, 0.32);
+  stroke-dasharray: 6 6;
+  stroke-width: 1;
+}
+
+.workspace-graph-container {
+  position: absolute;
+  display: block;
+  padding: 13px 15px;
+  border: 1px solid rgba(36, 36, 36, 0.48);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--color-text);
+}
+
+.workspace-graph-container.is-stem_group {
+  border-style: dashed;
+}
+
+.workspace-graph-container.is-gate_group {
+  border-color: rgba(36, 36, 36, 0.62);
+}
+
+.workspace-graph-container.is-authority_group {
+  border-width: 1.25px;
+}
+
+.workspace-graph-root[data-source-category="workstreams"]:not(.is-focus-mode)
+  .workspace-graph-container.is-emphasis-past {
+  opacity: 0.46;
+  filter: saturate(0.72);
+}
+
+.workspace-graph-root[data-source-category="workstreams"]:not(.is-focus-mode)
+  .workspace-graph-container.is-emphasis-recent {
+  opacity: 0.68;
+  filter: saturate(0.84);
+}
+
+.workspace-graph-root[data-source-category="workstreams"]:not(.is-focus-mode)
+  .workspace-graph-container.is-emphasis-active,
+.workspace-graph-root[data-source-category="workstreams"]:not(.is-focus-mode)
+  .workspace-graph-container.is-emphasis-resumable,
+.workspace-graph-root[data-source-category="workstreams"]:not(.is-focus-mode)
+  .workspace-graph-container.is-emphasis-attention {
+  border-color: rgba(36, 36, 36, 0.72);
+  opacity: 1;
+  filter: none;
+}
+
+.workspace-graph-root[data-source-category="workstreams"]:not(.is-focus-mode)
+  .workspace-graph-container.is-emphasis-active .workspace-graph-container-current,
+.workspace-graph-root[data-source-category="workstreams"]:not(.is-focus-mode)
+  .workspace-graph-container.is-emphasis-resumable .workspace-graph-container-current,
+.workspace-graph-root[data-source-category="workstreams"]:not(.is-focus-mode)
+  .workspace-graph-container.is-emphasis-attention .workspace-graph-container-current {
+  font-weight: 720;
+}
+
+.workspace-graph-container-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.workspace-graph-container-toggle {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  inline-size: 17px;
+  block-size: 17px;
+  margin-left: auto;
+  padding: 0;
+  border: 1px solid rgba(36, 36, 36, 0.42);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.32);
+  color: var(--color-text);
+  font-family: var(--type-tab-family);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.workspace-graph-container-toggle:hover {
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.workspace-graph-container-title,
+.workspace-graph-container-role,
+.workspace-graph-container-description,
+.workspace-graph-container-current {
+  display: block;
+  font-family: var(--type-tab-family);
+  letter-spacing: 0;
+  line-height: 1.15;
+  pointer-events: none;
+}
+
+.workspace-graph-container-title {
+  font-size: 13px;
+  font-weight: 660;
+}
+
+.workspace-graph-container-role {
+  color: var(--workspace-graph-label-muted-text);
+  font-size: 10px;
+  font-weight: 560;
+  text-transform: uppercase;
+}
+
+.workspace-graph-container-description {
+  max-width: min(420px, calc(100% - 4px));
+  margin-top: 8px;
+  color: var(--color-text);
+  font-size: 11px;
+  font-weight: 480;
+}
+
+.workspace-graph-container-current {
+  max-width: min(420px, calc(100% - 4px));
+  margin-top: 4px;
+  color: var(--color-text);
+  font-size: 10px;
+  font-weight: 620;
+}
+
+.workspace-graph-edge {
+  pointer-events: none;
+  stroke: var(--workspace-graph-edge-stroke);
+  stroke-width: 1;
+  opacity: 0.64;
+}
+
+.workspace-graph-edge.is-control {
+  stroke: var(--workspace-graph-control-edge-stroke);
+  stroke-width: 1.25;
+  opacity: 0.9;
+}
+
+.workspace-graph-edge.is-timing {
+  stroke: var(--workspace-graph-timing-edge-stroke);
+  stroke-width: 0.85;
+  opacity: 0.38;
+}
+
+.workspace-graph-edge.is-binding {
+  stroke: var(--workspace-graph-binding-edge-stroke);
+  stroke-width: 1.15;
+  opacity: 0.82;
+}
+
+.workspace-graph-edge.is-tempo {
+  stroke: var(--workspace-graph-tempo-edge-stroke);
+  stroke-width: 0.8;
+  stroke-dasharray: 2 4;
+  stroke-linecap: round;
+  opacity: 0.34;
+}
+
+.workspace-graph-edge.is-reference {
+  stroke-dasharray: 3 5;
+  stroke-linecap: round;
+  opacity: 0.48;
+}
+
+.workspace-graph-edge.is-support {
+  stroke-dasharray: 7 6;
+  stroke-linecap: round;
+  opacity: 0.42;
+}
+
+.workspace-graph-edge.is-return {
+  stroke-width: 0.95;
+  opacity: 0.52;
+}
+
+.workspace-graph-edge.is-disabled {
+  stroke: var(--workspace-graph-disabled-edge-stroke);
+  stroke-dasharray: 5 5;
+  opacity: 0.34;
+}
+
+.workspace-graph-edge.is-selected {
+  stroke: var(--workspace-graph-selected-edge-stroke);
+  stroke-width: 1.75;
+  opacity: 1;
+}
+
+.workspace-graph-root.has-signal-flow .workspace-graph-edge.is-active-chain,
+.workspace-graph-root.is-focus-mode .workspace-graph-edge.is-active-chain,
+.workspace-graph-root.is-focus-mode .workspace-graph-edge[data-transport-state="PLAYING"],
+.workspace-graph-root.is-focus-mode .workspace-graph-edge[data-transport-state="AUDITING"] {
+  stroke: var(--workspace-graph-active-edge-stroke);
+  stroke-width: 1.45;
+  opacity: 0.94;
+}
+
+.workspace-graph-edge-arrowhead {
+  fill: var(--workspace-graph-edge-stroke);
+  opacity: 1;
+  pointer-events: none;
+}
+
+.workspace-graph-edge-arrowhead.is-control {
+  fill: var(--workspace-graph-control-edge-stroke);
+}
+
+.workspace-graph-edge-arrowhead.is-timing {
+  fill: var(--workspace-graph-timing-edge-stroke);
+}
+
+.workspace-graph-edge-arrowhead.is-binding {
+  fill: var(--workspace-graph-binding-edge-stroke);
+}
+
+.workspace-graph-edge-arrowhead.is-reference,
+.workspace-graph-edge-arrowhead.is-support,
+.workspace-graph-edge-arrowhead.is-return {
+  opacity: 0.68;
+}
+
+.workspace-graph-edge-arrowhead.is-disabled {
+  fill: var(--workspace-graph-disabled-edge-stroke);
+}
+
+.workspace-graph-edge-arrowhead.is-selected,
+.workspace-graph-root.has-signal-flow .workspace-graph-edge-arrowhead.is-active-chain,
+.workspace-graph-root.is-focus-mode .workspace-graph-edge-arrowhead.is-active-chain,
+.workspace-graph-root.is-focus-mode .workspace-graph-edge-arrowhead[data-transport-state="PLAYING"],
+.workspace-graph-root.is-focus-mode .workspace-graph-edge-arrowhead[data-transport-state="AUDITING"] {
+  fill: var(--workspace-graph-active-edge-stroke);
+}
+
+.workspace-graph-edge-label {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  min-inline-size: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--workspace-graph-label-text);
+  font-family: var(--type-tab-family);
+  font-size: var(--type-meta);
+  font-weight: 520;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  pointer-events: auto;
+  transform: translate(-50%, -50%);
+}
+
+.workspace-graph-edge-label-text {
+  font-size: var(--type-meta);
+  line-height: 1;
+}
+
+.workspace-graph-edge-label-icon {
+  display: none;
+}
+
+.workspace-graph-edge-label.is-disabled {
+  color: var(--workspace-graph-label-disabled-text);
+}
+
+.workspace-graph-edge-label.is-timing,
+.workspace-graph-edge-label.is-binding,
+.workspace-graph-edge-label.is-tempo {
+  color: var(--workspace-graph-label-muted-text);
+}
+
+.workspace-graph-edge-label.is-reference,
+.workspace-graph-edge-label.is-support,
+.workspace-graph-edge-label.is-return {
+  opacity: 0.82;
+}
+
+.workspace-graph-edge-label.is-selected {
+  color: var(--workspace-graph-label-selected-text);
+}
+
+.workspace-graph-root.has-signal-flow .workspace-graph-edge-label.is-active-chain:not(.is-selected),
+.workspace-graph-root.is-focus-mode .workspace-graph-edge-label.is-active-chain:not(.is-selected),
+.workspace-graph-root.is-focus-mode .workspace-graph-edge-label[data-transport-state="PLAYING"]:not(.is-selected),
+.workspace-graph-root.is-focus-mode .workspace-graph-edge-label[data-transport-state="AUDITING"]:not(.is-selected) {
+  color: var(--workspace-graph-label-text);
+  opacity: 1;
+}
+
+.workspace-entity-item {
+  display: inline-flex;
+  align-items: center;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  min-height: 26px;
+  padding: 4px 9px;
+  border-style: solid;
+  border-width: var(--chip-border-width);
+  border-color: var(--chip-border-color);
+  border-radius: var(--chip-border-radius);
+  background: var(--chip-background);
+  color: var(--chip-text);
+}
+
+.workspace-graph-node {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  min-inline-size: 0;
+  appearance: none;
+  text-align: left;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.workspace-graph-node.is-drag-preview {
+  z-index: 12;
+  will-change: transform;
+}
+
+.workspace-graph-root.is-viewport-panning .workspace-graph-canvas {
+  cursor: grabbing;
+}
+
+.workspace-graph-node.is-extended {
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 9px 12px;
+  border-radius: 8px;
+  text-align: left;
+}
+
+.workspace-graph-node-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  gap: 3px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.workspace-graph-node-kicker,
+.workspace-graph-node-meta,
+.workspace-graph-node-source,
+.workspace-graph-node-summary,
+.workspace-graph-node-current {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-family: var(--type-tab-family);
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-graph-node-kicker {
+  color: var(--workspace-graph-label-muted-text);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.workspace-graph-node-title {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-family: var(--type-tab-family);
+  font-size: 14px;
+  font-weight: 620;
+  letter-spacing: 0;
+  line-height: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-graph-node-meta,
+.workspace-graph-node-source {
+  color: var(--workspace-graph-label-text);
+  font-size: 10px;
+  font-weight: 540;
+}
+
+.workspace-graph-node-summary {
+  display: -webkit-box;
+  color: var(--color-text);
+  font-size: 10px;
+  font-weight: 470;
+  line-height: 12px;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.workspace-graph-node-current {
+  display: -webkit-box;
+  color: var(--color-text);
+  font-size: 10px;
+  font-weight: 620;
+  line-height: 12px;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.workspace-graph-root.is-focus-mode .workspace-graph-node.workspace-entity-item[data-transport-state="PLAYING"],
+.workspace-graph-root.is-focus-mode .workspace-graph-node.workspace-entity-item[data-transport-state="AUDITING"] {
+  border-color: var(--color-text);
+  background: var(--workspace-graph-active-selected-background);
+  outline: 1px solid var(--color-text);
+  outline-offset: -2px;
+}
+
+.workspace-graph-node.workspace-entity-item.is-selected {
+  z-index: 13;
+  border-width: 2px;
+  border-color: var(--workspace-graph-selected-node-border);
+  background: var(--workspace-graph-node-selected-background);
+  color: var(--chip-selected-text);
+  outline: 0;
+  outline-offset: 0;
+}
+
+.workspace-graph-root.is-focus-mode .workspace-graph-node.workspace-entity-item.is-selected {
+  outline: 0;
+  outline-offset: 0;
+}
+
+.workspace-graph-root.has-signal-flow .workspace-graph-node.workspace-entity-item.is-active-chain:not(.is-selected),
+.workspace-graph-root.is-focus-mode .workspace-graph-node.workspace-entity-item.is-active-chain:not(.is-selected) {
+  border-color: var(--workspace-graph-active-chain-border);
+  background: var(--workspace-graph-active-chain-background);
+  color: var(--color-text);
+  outline: 0;
+}
+
+.workspace-graph-root[data-source-category="workstreams"]:not(.is-focus-mode)
+  .workspace-graph-node.workspace-entity-item.is-emphasis-past:not(.is-selected):not(.is-active-chain) {
+  opacity: 0.42;
+  filter: saturate(0.62);
+}
+
+.workspace-graph-root[data-source-category="workstreams"]:not(.is-focus-mode)
+  .workspace-graph-node.workspace-entity-item.is-emphasis-context:not(.is-selected):not(.is-active-chain) {
+  opacity: 0.76;
+  filter: saturate(0.86);
+}
+
+.workspace-graph-root[data-source-category="workstreams"]
+  .workspace-graph-node.workspace-entity-item.is-emphasis-latest:not(.is-selected),
+.workspace-graph-root[data-source-category="workstreams"]
+  .workspace-graph-node.workspace-entity-item.is-emphasis-ongoing:not(.is-selected),
+.workspace-graph-root[data-source-category="workstreams"]
+  .workspace-graph-node.workspace-entity-item.is-emphasis-current:not(.is-selected),
+.workspace-graph-root[data-source-category="workstreams"]
+  .workspace-graph-node.workspace-entity-item.is-emphasis-attention:not(.is-selected) {
+  z-index: 11;
+  border-color: var(--workspace-graph-active-chain-border);
+  background: var(--workspace-graph-active-chain-background);
+  opacity: 1;
+  filter: none;
+  outline: 1px solid var(--workspace-graph-active-chain-border);
+  outline-offset: -2px;
+}
+
+.workspace-graph-node.is-excluded {
+  opacity: 0.56;
+}
+
+.workspace-entity-label {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-inline-size: min(var(--workspace-entity-label-max-inline-size, 180px), 100%);
+  overflow: hidden;
+  color: inherit;
+  font-family: var(--type-tab-family);
+  font-size: var(--type-tab-size);
+  font-weight: 520;
+  letter-spacing: var(--type-tab-letter);
+  line-height: var(--type-tab-line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-graph-node-label {
+  padding-right: 0;
+  text-align: center;
+}
+
+.workspace-graph-node-drilldown-marker {
+  position: absolute;
+  z-index: 2;
+  inset-block-start: -5px;
+  inset-inline-end: -5px;
+  display: grid;
+  place-items: center;
+  inline-size: 14px;
+  block-size: 14px;
+  border: 1px solid var(--workspace-graph-drilldown-marker-border);
+  border-radius: 999px;
+  background: var(--workspace-graph-drilldown-marker-background);
+  color: var(--color-text);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.workspace-graph-node-drilldown-marker::before {
+  content: "";
+  inline-size: 5px;
+  block-size: 5px;
+  border-block-start: 1.5px solid currentColor;
+  border-inline-end: 1.5px solid currentColor;
+  transform: translateX(-1px) rotate(45deg);
+}
+
+.workspace-graph-container-expand-marker {
+  position: absolute;
+  z-index: 2;
+  inset-block-start: -5px;
+  inset-inline-end: -5px;
+  display: grid;
+  place-items: center;
+  inline-size: 14px;
+  block-size: 14px;
+  border: 1px solid var(--color-text);
+  border-radius: 999px;
+  background: var(--chip-background);
+  color: var(--color-text);
+  font-family: var(--type-tab-family);
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.workspace-graph-container-expand-marker::before {
+  content: "+";
+  transform: translateY(-0.5px);
+}
+
+.workspace-graph-node-repeat-label {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  color: var(--workspace-graph-label-muted-text);
+  font-family: var(--type-tab-family);
+  font-size: var(--type-meta);
+  font-weight: 520;
+  line-height: 1;
+  pointer-events: none;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.workspace-graph-node-connector {
+  position: absolute;
+  inline-size: 6px;
+  block-size: 6px;
+  border: 1px solid var(--workspace-graph-connector-ring);
+  border-radius: 999px;
+  background: var(--workspace-graph-connector-fill);
+  opacity: 1;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.workspace-graph-node-connector.is-timing {
+  border-color: var(--workspace-graph-timing-edge-stroke);
+}
+
+.workspace-graph-node-connector.is-binding {
+  border-color: var(--workspace-graph-binding-edge-stroke);
+}
+
+.workspace-graph-node-connector.is-tempo {
+  border-color: var(--workspace-graph-tempo-edge-stroke);
+}
+
+.workspace-graph-node-connector.is-control {
+  border-color: var(--workspace-graph-control-connector-ring);
+}
+
+.workspace-graph-root.has-signal-flow .workspace-graph-node-connector.is-active-chain,
+.workspace-graph-root.is-focus-mode .workspace-graph-node-connector.is-active-chain,
+.workspace-graph-root.is-focus-mode .workspace-graph-node-connector[data-transport-state="PLAYING"],
+.workspace-graph-root.is-focus-mode .workspace-graph-node-connector[data-transport-state="AUDITING"],
+.workspace-graph-root.has-signal-flow .workspace-graph-node.is-active-chain .workspace-graph-node-connector,
+.workspace-graph-root.is-focus-mode .workspace-graph-node.is-active-chain .workspace-graph-node-connector,
+.workspace-graph-root.has-signal-flow .workspace-graph-node.is-selected.is-active-chain .workspace-graph-node-connector,
+.workspace-graph-root.is-focus-mode .workspace-graph-node.is-selected.is-active-chain .workspace-graph-node-connector {
+  border-color: var(--workspace-graph-active-connector-ring);
+  background: var(--workspace-graph-active-chain-background);
+}
+
+.workspace-graph-node.is-selected .workspace-graph-node-connector {
+  border-color: var(--workspace-graph-selected-connector-ring);
+  background: var(--workspace-graph-node-selected-background);
+}
+
+.workspace-graph-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--workspace-graph-empty-text);
+  font-family: var(--type-tab-family);
+  font-size: var(--type-tab-size);
+  font-weight: 520;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}

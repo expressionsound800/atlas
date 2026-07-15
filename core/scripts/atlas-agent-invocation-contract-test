@@ -1,0 +1,211 @@
+#!/usr/bin/env node
+
+/*
+ * Agent Invocation Contract Test creates fresh arbitrary repositories in a
+ * caller-supplied technical space. It proves AGENTS-compatible discovery,
+ * consumer-instruction preservation, repository-local CLI use, instance
+ * isolation, moved-checkout operation, explicit opt-out, and managed-marker
+ * failure behavior without a remote service or consumer-specific fixture.
+ */
+
+import childProcess from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import {
+  ATLAS_AGENT_INVOCATION_CONTRACT,
+  ATLAS_AGENT_INSTRUCTION_BEGIN,
+  ATLAS_AGENT_INSTRUCTION_END,
+  installAtlasAgentInstructions,
+} from "../product/agent-invocation-contract.mjs";
+
+/** Reads a contract-fixture option from separated or equals-prefixed CLI syntax. */
+function argValue(name, fallback = "") {
+  const exact = process.argv.indexOf(name);
+  if (exact >= 0) return process.argv[exact + 1] || fallback;
+  const prefixed = process.argv.find((arg) => arg.startsWith(`${name}=`));
+  return prefixed ? prefixed.slice(name.length + 1) : fallback;
+}
+
+/** Checks one agent-invocation invariant and stops the fixture with its precise failure. */
+function check(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+/** Verifies that malformed managed-instruction operations reject with the expected diagnostic. */
+function rejects(operation, expected) {
+  try {
+    operation();
+  } catch (error) {
+    check(String(error?.message || error).includes(expected), `unexpected rejection: ${error}`);
+    return;
+  }
+  throw new Error(`expected rejection containing: ${expected}`);
+}
+
+/** Runs one fixture command and enforces its explicitly allowed process statuses. */
+function run(command, args, options = {}) {
+  const result = childProcess.spawnSync(command, args, {
+    cwd: options.cwd,
+    env: { ...process.env, ...(options.env || {}) },
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (!(options.allowedStatus || [0]).includes(result.status)) {
+    throw new Error(`Command failed (${result.status}): ${command} ${args.join(" ")}\n${result.stdout}\n${result.stderr}`);
+  }
+  return result;
+}
+
+/** Runs a fixture command and parses its stdout as a required JSON result. */
+function runJson(command, args, options = {}) {
+  const result = run(command, args, options);
+  try {
+    return { result, payload: JSON.parse(result.stdout) };
+  } catch (error) {
+    throw new Error(`Command did not return JSON: ${command} ${args.join(" ")}\n${result.stdout}\n${error}`);
+  }
+}
+
+/** Counts exact managed markers to prove each consumer receives one complete block. */
+function count(value, token) {
+  return value.split(token).length - 1;
+}
+
+/** Writes an isolated repository fixture with optional pre-existing consumer agent instructions. */
+function writeFixture(root, label, options = {}) {
+  fs.mkdirSync(path.join(root, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(root, "README.md"), `# ${label}\n\nRepository-local Atlas agent invocation fixture.\n`);
+  fs.writeFileSync(path.join(root, "docs", "CONTEXT.md"), `# ${label} Context\n\n${options.sentinel} belongs only to ${label}.\n`);
+  if (options.agentPrefix) fs.writeFileSync(path.join(root, "AGENTS.md"), options.agentPrefix);
+}
+
+const workRootValue = argValue("--work-root");
+const graphSourceValue = argValue("--graph-source");
+check(workRootValue && path.isAbsolute(workRootValue), "--work-root must be an absolute registered technical-space path");
+check(graphSourceValue, "--graph-source is required");
+const workRoot = path.resolve(workRootValue);
+const atlasSource = path.resolve(argValue("--atlas-source", path.resolve(import.meta.dirname, "..")));
+const graphSource = path.resolve(graphSourceValue);
+const repositoryA = path.join(workRoot, "repository-a");
+const movedRepositoryA = path.join(workRoot, "repository-a-moved");
+const repositoryB = path.join(workRoot, "repository-b");
+const optedOutRepository = path.join(workRoot, "repository-opted-out");
+const brokenRepository = path.join(workRoot, "repository-broken-markers");
+const uninstalledRepository = path.join(workRoot, "repository-uninstalled");
+const consumerPrefix = "# Consumer Agent Rules\n\nRun consumer-route first.\n";
+
+fs.rmSync(workRoot, { recursive: true, force: true });
+writeFixture(repositoryA, "Repository Alpha", { sentinel: "alpha-sentinel", agentPrefix: consumerPrefix });
+writeFixture(repositoryB, "Repository Beta", { sentinel: "beta-sentinel" });
+writeFixture(optedOutRepository, "Repository Opted Out", { sentinel: "opt-out-sentinel" });
+fs.mkdirSync(brokenRepository, { recursive: true });
+fs.writeFileSync(path.join(brokenRepository, "AGENTS.md"), `${ATLAS_AGENT_INSTRUCTION_BEGIN}\npartial block\n`);
+fs.mkdirSync(uninstalledRepository, { recursive: true });
+installAtlasAgentInstructions({ root: uninstalledRepository });
+
+/** Runs repository-local initialization and returns the parsed agent-invocation result payload. */
+const initialize = (root, repositoryId, extra = []) => runJson(process.execPath, [
+  path.join(atlasSource, "scripts", "atlas-init"),
+  "--repo", root,
+  "--repository-id", repositoryId,
+  "--include", "AGENTS.md",
+  "--include", "README.md",
+  "--include", "docs",
+  "--atlas-source", atlasSource,
+  "--graph-source", graphSource,
+  "--allow-source-changes",
+  ...extra,
+  "--json",
+], { cwd: atlasSource }).payload;
+
+const initializedA = initialize(repositoryA, "repository-alpha");
+const initializedB = initialize(repositoryB, "repository-beta");
+const optedOut = initialize(optedOutRepository, "repository-opted-out", ["--no-agent-instructions"]);
+check(initializedA.status === "pass" && initializedB.status === "pass", "fresh repository initialization failed");
+check(initializedA.agentInstructions.status === "current" && initializedA.agentInstructions.action === "appended", "existing consumer AGENTS.md did not receive the managed block");
+check(initializedB.agentInstructions.status === "current" && initializedB.agentInstructions.action === "created", "fresh repository did not receive a root AGENTS.md");
+check(optedOut.agentInstructions.status === "absent" && !fs.existsSync(path.join(optedOutRepository, "AGENTS.md")), "explicit agent-instruction opt-out was ignored");
+check(ATLAS_AGENT_INVOCATION_CONTRACT.hostCapability === "repository-agents-md", "minimal invocation host capability is not explicit");
+check(ATLAS_AGENT_INVOCATION_CONTRACT.unsupportedHostBehavior.includes("explicit-installed-cli"), "unsupported hosts do not retain an explicit CLI fallback");
+const absentCommand = childProcess.spawnSync(path.join(uninstalledRepository, ".atlas", "bin", "atlas"), ["evidence", "request"], {
+  cwd: uninstalledRepository,
+  encoding: "utf8",
+});
+check(absentCommand.error?.code === "ENOENT", "absent repository-local installation did not fail without a global fallback");
+
+const agentsAPath = path.join(repositoryA, "AGENTS.md");
+const agentsBPath = path.join(repositoryB, "AGENTS.md");
+const agentsA = fs.readFileSync(agentsAPath, "utf8");
+const agentsB = fs.readFileSync(agentsBPath, "utf8");
+for (const content of [agentsA, agentsB]) {
+  check(count(content, ATLAS_AGENT_INSTRUCTION_BEGIN) === 1 && count(content, ATLAS_AGENT_INSTRUCTION_END) === 1, "managed instruction block is not singular");
+  check(content.indexOf("before broad source exploration") < content.indexOf(".atlas/bin/atlas evidence"), "instruction trigger does not precede evidence retrieval");
+  check(content.indexOf(".atlas/bin/atlas evidence") < content.indexOf(".atlas/bin/atlas search"), "diagnostic search appears before normal evidence retrieval");
+  for (const state of ["weak", "stale", "missing", "conflicting"]) check(content.includes(`\`${state}\``), `instruction block omits ${state} behavior`);
+  check(!content.includes("http://") && !content.includes("https://"), "minimal invocation block contains a remote endpoint");
+  for (const forbidden of [workRoot, atlasSource, graphSource]) check(!content.includes(forbidden), `instruction block leaked an absolute path: ${forbidden}`);
+}
+check(agentsA.startsWith(consumerPrefix), "consumer-authored instructions changed outside the managed block");
+
+const commandA = path.join(repositoryA, ".atlas", "bin", "atlas");
+const commandB = path.join(repositoryB, ".atlas", "bin", "atlas");
+const checkA = runJson(commandA, ["agent-instructions"], { cwd: repositoryA }).payload;
+check(checkA.status === "pass" && checkA.instructions.status === "current", "installed CLI did not verify current agent instructions");
+const beforeInstall = fs.readFileSync(agentsAPath, "utf8");
+const reinstallA = runJson(commandA, ["agent-instructions", "--install"], { cwd: repositoryA }).payload;
+check(reinstallA.instructions.action === "unchanged" && fs.readFileSync(agentsAPath, "utf8") === beforeInstall, "managed instruction installation is not idempotent");
+
+fs.writeFileSync(agentsAPath, beforeInstall.replace("Atlas summaries and excerpts", "Atlas generated summaries and excerpts"));
+const staleA = runJson(commandA, ["agent-instructions"], { cwd: repositoryA, allowedStatus: [2] }).payload;
+check(staleA.status === "attention" && staleA.instructions.status === "stale", "changed managed instructions were not reported stale");
+const refreshedA = runJson(commandA, ["agent-instructions", "--install"], { cwd: repositoryA }).payload;
+check(refreshedA.instructions.status === "current" && refreshedA.instructions.action === "updated", "explicit managed-block refresh failed");
+check(fs.readFileSync(agentsAPath, "utf8").startsWith(consumerPrefix), "managed-block refresh changed consumer instructions");
+
+const evidenceA = runJson(commandA, ["evidence", "alpha sentinel", "--limit", "3"], { cwd: repositoryA }).payload;
+const evidenceB = runJson(commandB, ["evidence", "beta sentinel", "--limit", "3"], { cwd: repositoryB }).payload;
+check(evidenceA.schema === "multihead-atlas.instance_evidence.v2" && evidenceB.schema === evidenceA.schema, "agent invocation did not use the common Evidence v2 CLI authority");
+check(evidenceA.repositoryId === "repository-alpha" && evidenceB.repositoryId === "repository-beta", "two repositories selected the wrong local Atlas instance");
+check(evidenceA.evidence.some((row) => row.source.path === "docs/CONTEXT.md"), "Repository Alpha evidence missed its local source");
+check(evidenceB.evidence.some((row) => row.source.path === "docs/CONTEXT.md"), "Repository Beta evidence missed its local source");
+
+fs.appendFileSync(path.join(repositoryB, ".atlas", "runtime", "atlas", "product", "repository-provider.mjs"), "\n// invalid-lock fixture\n");
+const invalidLock = run(commandB, ["agent-instructions"], { cwd: repositoryB, allowedStatus: [1] });
+check(invalidLock.stderr.includes("Atlas installation verification failed"), "agent invocation did not stop on an invalid installation lock");
+
+fs.renameSync(repositoryA, movedRepositoryA);
+const movedCommandA = path.join(movedRepositoryA, ".atlas", "bin", "atlas");
+const movedCheck = runJson(movedCommandA, ["agent-instructions"], { cwd: movedRepositoryA }).payload;
+const movedEvidence = runJson(movedCommandA, ["evidence", "alpha sentinel", "--limit", "3"], {
+  cwd: movedRepositoryA,
+  env: {
+    MULTIHEAD_ATLAS_ROOT: path.join(workRoot, "missing-development-checkout"),
+    MULTIHEAD_ATLAS_SOURCE: path.join(workRoot, "missing-development-checkout"),
+  },
+}).payload;
+check(movedCheck.status === "pass" && movedEvidence.repositoryId === "repository-alpha", "moved checkout lost repository-local agent invocation");
+check(!fs.readFileSync(path.join(movedRepositoryA, "AGENTS.md"), "utf8").includes(repositoryA), "moved instructions retained the original absolute path");
+
+rejects(() => installAtlasAgentInstructions({ root: brokenRepository }), "exactly one complete managed block");
+
+console.log(JSON.stringify({
+  schema: "multihead-atlas.agent_invocation_contract_test.v1",
+  status: "pass",
+  metrics: {
+    freshAgentRepositories: 2,
+    existingConsumerInstructionsPreserved: 1,
+    managedBlocks: 2,
+    idempotentInstalls: 1,
+    staleBlocksDetected: 1,
+    explicitRefreshes: 1,
+    repositoryIsolationChecks: 2,
+    movedCheckoutChecks: 2,
+    offlineEvidenceQueries: 3,
+    invalidInstallationStops: 1,
+    absentInstallationStops: 1,
+    supportedHostCapabilities: 1,
+    unsupportedHostFallbacks: 1,
+    optOuts: 1,
+    invalidMarkerRejections: 1,
+  },
+}, null, 2));

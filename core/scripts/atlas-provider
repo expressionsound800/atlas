@@ -1,0 +1,181 @@
+#!/usr/bin/env node
+
+/*
+ * Atlas Provider is the default repository-instance HTTP adapter consumed by
+ * the installed Graph lens. It projects only the current repository's
+ * validated instance catalog and local index; custom providers may replace it
+ * without changing the Atlas installation or Graph packages.
+ */
+
+import http from "node:http";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import {
+  buildAtlasRepositoryInventory,
+  buildAtlasInstanceGraphProjection,
+  buildAtlasInstanceRoute,
+  buildAtlasInstanceSlices,
+  createAtlasInstanceProvider,
+  scanAtlasInstanceSources,
+} from "../product/instance-contract.mjs";
+
+/** Reads one provider option from separated or equals-prefixed argument syntax. */
+function argValue(name, fallback = "") {
+  const exact = process.argv.indexOf(name);
+  if (exact >= 0) return process.argv[exact + 1] || fallback;
+  const prefixed = process.argv.find((arg) => arg.startsWith(`${name}=`));
+  return prefixed ? prefixed.slice(name.length + 1) : fallback;
+}
+
+/** Sends one uncached JSON response with the supplied HTTP status code. */
+function send(response, status, payload) {
+  response.writeHead(status, {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "no-store",
+  });
+  response.end(JSON.stringify(payload, null, 2));
+}
+
+/** Builds a schema-valid empty optional-view projection under repository authority. */
+function emptyProjection(authority, view) {
+  return {
+    schema: `multihead-atlas.instance_${view}_projection.v1`,
+    view,
+    authority,
+    nodes: [],
+    edges: [],
+    containers: [],
+    metadata: { status: "empty", repositoryId: authority, sourceAvailable: false },
+  };
+}
+
+const root = path.resolve(argValue("--root", process.cwd()));
+const port = Number.parseInt(process.env.ATLAS_PROVIDER_PORT || argValue("--port", "8765"), 10);
+const host = "127.0.0.1";
+let bound = await createAtlasInstanceProvider({ root });
+await bound.provider.ensure();
+let refreshPromise = null;
+
+/** Returns a SHA-256 digest over every current generated-artifact filename and byte sequence. */
+function currentGenerationStateDigest() {
+  const currentRoot = path.join(root, ".atlas", "state", "generation", "current");
+  const hash = crypto.createHash("sha256");
+  if (!fs.existsSync(currentRoot)) return hash.update("missing").digest("hex");
+  for (const name of fs.readdirSync(currentRoot).filter((entry) => entry.endsWith(".json")).sort()) {
+    hash.update(name).update("\0").update(fs.readFileSync(path.join(currentRoot, name))).update("\0");
+  }
+  return hash.digest("hex");
+}
+
+/** Returns one live binding key combining admitted-source and current-generation identities. */
+function currentBindingKey(instance) {
+  const inventory = buildAtlasRepositoryInventory(scanAtlasInstanceSources({ root, instance }));
+  return `${inventory.digest}:${currentGenerationStateDigest()}`;
+}
+
+let boundKey = currentBindingKey(bound.instance);
+
+/** Returns a provider binding current for both admitted sources and applied generation state. */
+async function currentBinding() {
+  const requestedKey = currentBindingKey(bound.instance);
+  if (requestedKey === boundKey) return bound;
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      const refreshed = await createAtlasInstanceProvider({ root });
+      await refreshed.provider.ensure();
+      bound = refreshed;
+      boundKey = currentBindingKey(refreshed.instance);
+      return refreshed;
+    })();
+  }
+  try {
+    return await refreshPromise;
+  } finally {
+    refreshPromise = null;
+  }
+}
+
+const server = http.createServer(async (request, response) => {
+  const url = new URL(request.url || "/", `http://${host}:${port}`);
+  const query = url.searchParams.get("query") || "repository architecture";
+  try {
+    const active = await currentBinding();
+    /** Builds the current repository-local route packet from the bound index and requested room. */
+    const routePacket = (currentRoom) => {
+      const search = active.provider.search({ query, limit: 8 });
+      const retrieval = active.provider.retrievalContract({ index: active.provider.status() });
+      return buildAtlasInstanceRoute(active.catalog, { query, currentRoom, search, retrieval });
+    };
+    if (url.pathname === "/") {
+      send(response, 200, {
+        schema: "multihead-atlas.instance_provider_health.v1",
+        status: "pass",
+        repositoryId: active.instance.repositoryId,
+      });
+      return;
+    }
+    if (url.pathname === "/api/architecture-slices") {
+      send(response, 200, buildAtlasInstanceSlices(active.catalog));
+      return;
+    }
+    if (url.pathname === "/api/architecture-graph") {
+      const roomId = url.searchParams.get("slice") || active.instance.graph.defaultRoom;
+      send(response, 200, buildAtlasInstanceGraphProjection({
+        catalog: active.catalog,
+        roomId,
+        route: routePacket(roomId),
+      }));
+      return;
+    }
+    if (url.pathname === "/api/architecture-route") {
+      send(response, 200, routePacket(url.searchParams.get("currentRoom") || active.instance.graph.defaultRoom));
+      return;
+    }
+    if (url.pathname === "/api/architecture-evidence") {
+      const graph = buildAtlasInstanceGraphProjection({
+        catalog: active.catalog,
+        roomId: url.searchParams.get("slice") || active.instance.graph.defaultRoom,
+      });
+      send(response, 200, {
+        schema: "multihead-atlas.instance_source_evidence.v1",
+        status: "pass",
+        repositoryId: active.instance.repositoryId,
+        roomId: graph.roomId,
+        sourcePaths: graph.metadata.sourcePaths,
+      });
+      return;
+    }
+    if (url.pathname === "/api/router-health") {
+      send(response, 200, {
+        schema: "multihead-atlas.instance_router_health.v1",
+        status: "pass",
+        summary: { missing: 0, attention: 0, passed: 1, required: 1 },
+        gates: [],
+      });
+      return;
+    }
+    if (url.pathname === "/api/workstreams") {
+      send(response, 200, emptyProjection(active.instance.repositoryId, "workstreams"));
+      return;
+    }
+    if (url.pathname === "/api/git-gate-graph") {
+      send(response, 200, emptyProjection(active.instance.repositoryId, "git-gate"));
+      return;
+    }
+    if (url.pathname === "/api/backlog-graph") {
+      send(response, 200, emptyProjection(active.instance.repositoryId, "backlog"));
+      return;
+    }
+    send(response, 404, { status: "not-found", path: url.pathname });
+  } catch (error) {
+    send(response, Number(error?.statusCode || 500), {
+      status: "fail",
+      error: error?.message || String(error),
+    });
+  }
+});
+
+server.listen(port, host, () => {
+  console.log(`Atlas repository provider: http://${host}:${port}/`);
+});

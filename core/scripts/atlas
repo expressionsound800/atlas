@@ -1,0 +1,532 @@
+#!/usr/bin/env node
+
+/*
+ * Atlas is the repository-local command surface installed into every consumer
+ * instance. It binds generic product operations to atlas.instance.json and
+ * delegates Graph and immutable sync transport to their product commands. It
+ * never imports the Atlas development checkout or a family-specific provider.
+ */
+
+import childProcess from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import {
+  ATLAS_AGENT_INSTRUCTION_RESULT_SCHEMA,
+  inspectAtlasAgentInstructions,
+  installAtlasAgentInstructions,
+} from "../product/agent-invocation-contract.mjs";
+import { buildAtlasEvidencePacket } from "../product/evidence-contract.mjs";
+import {
+  applyAtlasGenerationResult,
+  atlasGenerationStatus,
+  buildAtlasGenerationRequest,
+  defaultAtlasGenerationConfig,
+  readAtlasGenerationRequest,
+  runAtlasGenerationAdapter,
+  storeAtlasGenerationRequest,
+  validateAtlasGenerationConfig,
+} from "../product/generation-provider.mjs";
+import { verifyAtlasInstallation } from "../product/installation-contract.mjs";
+import {
+  ATLAS_INSTANCE_SCHEMA,
+  buildAtlasRepositoryInventory,
+  buildAtlasInstanceGraphProjection,
+  createAtlasInstanceProvider,
+  scanAtlasInstanceSources,
+  selectAtlasRepositoryOrientationSources,
+  writeAtlasInstanceGenerationConfig,
+} from "../product/instance-contract.mjs";
+
+/** Reads one CLI option from separated or equals-prefixed argument syntax. */
+function argValue(name, fallback = "") {
+  const exact = process.argv.indexOf(name);
+  if (exact >= 0) return process.argv[exact + 1] || fallback;
+  const prefixed = process.argv.find((arg) => arg.startsWith(`${name}=`));
+  return prefixed ? prefixed.slice(name.length + 1) : fallback;
+}
+
+/** Reads every repeated CLI option from separated or equals-prefixed syntax. */
+function argValues(name) {
+  const values = [];
+  for (let index = 0; index < process.argv.length; index += 1) {
+    const argument = process.argv[index];
+    if (argument === name && process.argv[index + 1]) values.push(process.argv[index + 1]);
+    if (argument.startsWith(`${name}=`)) values.push(argument.slice(name.length + 1));
+  }
+  return values;
+}
+
+/** Checks whether an exact boolean flag is present in the command invocation. */
+function enabled(name) {
+  return process.argv.includes(name);
+}
+
+/** Prints one command result as stable human-readable JSON for agents and users. */
+function print(payload) {
+  console.log(JSON.stringify(payload, null, 2));
+}
+
+/** Prints the installed command surface and its repository-binding behavior. */
+function usage() {
+  console.log(`Usage:
+  .atlas/bin/atlas verify
+  .atlas/bin/atlas index
+  .atlas/bin/atlas search QUERY
+  .atlas/bin/atlas evidence QUERY
+  .atlas/bin/atlas agent-instructions [--install]
+  .atlas/bin/atlas map [--allow-remote]
+  .atlas/bin/atlas generation status
+  .atlas/bin/atlas generation configure current-agent
+  .atlas/bin/atlas generation configure command --id ID --command PATH --data-boundary local|remote
+  .atlas/bin/atlas generation request --kind KIND --source PATH [--source PATH] [--instruction TEXT]
+  .atlas/bin/atlas generation apply --artifact PATH
+  .atlas/bin/atlas generation run --kind KIND --source PATH [--instruction TEXT] [--allow-remote]
+  .atlas/bin/atlas generation test
+  .atlas/bin/atlas graph [--room ID] [--open] [--smoke]
+  .atlas/bin/atlas sync status
+  .atlas/bin/atlas sync <atlas-sync command and arguments>
+  .atlas/bin/atlas update --atlas-source PATH --graph-source PATH
+  .atlas/bin/atlas uninstall [--dry-run] [--yes] [--delete-sync-exchange]
+
+Commands bind to .atlas/atlas.instance.json in the repository named by --root
+or the current working directory. Atlas update is explicit and invokes the new
+source checkout's initializer; normal commands use only the installed runtime.`);
+}
+
+/** Joins positional words following a retrieval command while excluding recognized option values. */
+function queryAfter(command) {
+  const commandIndex = process.argv.indexOf(command);
+  return process.argv.slice(commandIndex + 1)
+    .filter((arg, index, all) => !arg.startsWith("--") && all[index - 1] !== "--root" && all[index - 1] !== "--limit")
+    .join(" ")
+    .trim();
+}
+
+/** Runs an installed delegated command with inherited environment and terminal ownership. */
+function runInstalledScript(scriptPath, args) {
+  const result = childProcess.spawnSync(process.execPath, [scriptPath, ...args], {
+    cwd: root,
+    env: process.env,
+    stdio: "inherit",
+  });
+  if (result.error) throw result.error;
+  process.exit(result.status ?? 1);
+}
+
+/** Resolves a CLI input file while preventing reads outside the consumer repository. */
+function repositoryInputPath(value, field) {
+  const input = String(value || "").trim();
+  if (!input) throw new Error(`Atlas ${field} is required`);
+  const resolved = path.resolve(root, input);
+  const relation = path.relative(root, resolved);
+  if (!relation || relation === ".." || relation.startsWith(`..${path.sep}`) || path.isAbsolute(relation)) {
+    throw new Error(`Atlas ${field} must name a file inside the consumer repository`);
+  }
+  return resolved;
+}
+
+const command = process.argv[2];
+if (!command || enabled("--help") || enabled("-h")) {
+  usage();
+  process.exit(command ? 0 : 1);
+}
+
+const root = path.resolve(argValue("--root", process.cwd()));
+if (command === "uninstall") {
+  const uninstallScript = path.join(import.meta.dirname, "atlas-uninstall");
+  const args = [...process.argv.slice(3), "--repo", root];
+  const result = childProcess.spawnSync(process.execPath, [uninstallScript, ...args], {
+    cwd: root,
+    env: process.env,
+    stdio: "inherit",
+  });
+  if (result.error) throw result.error;
+  process.exit(result.status ?? 1);
+}
+const manifestPath = path.join(root, ".atlas", "atlas.install.json");
+const verification = verifyAtlasInstallation({ root, manifestPath });
+if (verification.status !== "pass") throw new Error("Atlas installation verification failed");
+
+if (command === "agent-instructions") {
+  // The check is read-only by default. --install grants Atlas mutation
+  // authority only inside its root AGENTS.md managed markers.
+  const instructions = enabled("--install")
+    ? installAtlasAgentInstructions({ root })
+    : inspectAtlasAgentInstructions({ root });
+  print({
+    schema: ATLAS_AGENT_INSTRUCTION_RESULT_SCHEMA,
+    status: instructions.status === "current" ? "pass" : "attention",
+    repositoryRoot: ".",
+    mode: enabled("--install") ? "install" : "check",
+    instructions,
+  });
+  process.exit(instructions.status === "current" ? 0 : 2);
+}
+
+const bound = await createAtlasInstanceProvider({ root });
+const runtimeAtlasRoot = path.join(verification.runtimeRoot, "atlas");
+
+/** Builds and stores one request from explicit source paths already admitted by the instance scan. */
+function createGenerationRequest() {
+  const selectedPaths = [...new Set(argValues("--source").map((value) => value.replace(/\\/gu, "/").replace(/^\.\//u, "")))];
+  if (!selectedPaths.length) throw new Error("Atlas generation requires at least one explicit --source path");
+  const scan = scanAtlasInstanceSources({ root, instance: bound.instance });
+  const byPath = new Map(scan.files.map((source) => [source.path, source]));
+  const sources = selectedPaths.map((sourcePath) => {
+    const source = byPath.get(sourcePath);
+    if (!source) throw new Error(`Atlas generation source is not admitted by the instance policy: ${sourcePath}`);
+    return source;
+  });
+  const kind = argValue("--kind");
+  const request = buildAtlasGenerationRequest({
+    repositoryId: bound.instance.repositoryId,
+    kind,
+    instruction: argValue("--instruction"),
+    sources,
+    ...(kind === "repository-system-model" ? { repositoryInventory: buildAtlasRepositoryInventory(scan) } : {}),
+  });
+  return storeAtlasGenerationRequest({ root, request });
+}
+
+/**
+ * Builds the model instruction consumed identically by the current-agent and
+ * command-adapter paths. The validator, not this prose, remains the authority
+ * for citations, semantic endpoints, freshness, and pseudo-room rejection.
+ */
+function repositorySystemModelInstruction() {
+  return [
+    "Learn and explain this repository as a system using only the supplied orientation sources.",
+    "Return artifact.systemModel with schema multihead-atlas.repository_system_model.v1.",
+    "Describe repository purpose/non-goals; responsibility-based semantic components; directed relationships and flows; and explicit unknowns.",
+    "Every repository, component, relationship, flow, and unknown claim must cite exact supplied source path+digest pairs.",
+    "Component ids and labels must name system responsibilities, not filenames, folders, classes, or functions merely because they exist.",
+    "Use component fields id,label,responsibility,viewpoint,region,facets,answers,evidence,confidence.",
+    "Use relationship fields id,from,to,kind,label,description,evidence,confidence and only declared component endpoints.",
+    "Use flow fields id,label,description,steps,evidence,confidence; each step has componentId and action.",
+    "Use unknown fields id,description,evidence,confidence. Confidence values are numbers from 0 to 1.",
+    "Return empty room fields because repository-system-model owns multiple semantic rooms.",
+  ].join("\n");
+}
+
+/** Selects, builds, and stores one bounded repository-mapping request. */
+function createRepositoryMapRequest() {
+  const scan = scanAtlasInstanceSources({ root, instance: bound.instance });
+  const orientation = selectAtlasRepositoryOrientationSources({ scan });
+  const request = buildAtlasGenerationRequest({
+    repositoryId: bound.instance.repositoryId,
+    kind: "repository-system-model",
+    instruction: repositorySystemModelInstruction(),
+    sources: orientation.sources,
+    repositoryInventory: orientation.repositoryInventory,
+  });
+  return Object.freeze({ ...storeAtlasGenerationRequest({ root, request }), orientation });
+}
+
+/** Computes the current full admitted-inventory identity without widening generated request content. */
+function currentRepositoryInventory() {
+  return buildAtlasRepositoryInventory(scanAtlasInstanceSources({ root, instance: bound.instance }));
+}
+
+if (command === "verify") {
+  const index = await bound.provider.ensure();
+  print({
+    schema: "multihead-atlas.instance_verification.v1",
+    status: "pass",
+    instanceSchema: ATLAS_INSTANCE_SCHEMA,
+    repositoryId: bound.instance.repositoryId,
+    installation: verification,
+    provider: bound.provider.describe(),
+    index: { status: index.status, digest: index.digest, metrics: index.metrics },
+    generation: atlasGenerationStatus({
+      root,
+      generation: bound.instance.generation,
+      repositoryInventory: currentRepositoryInventory(),
+    }),
+    agentInstructions: inspectAtlasAgentInstructions({ root }),
+  });
+  process.exit(0);
+}
+
+if (command === "map") {
+  const stored = createRepositoryMapRequest();
+  if (bound.instance.generation.mode === "current-agent") {
+    print({
+      schema: "multihead-atlas.map_result.v1",
+      status: "action-required",
+      mode: "current-agent",
+      handshake: "request-current-agent-result-apply",
+      requestPath: stored.path,
+      orientation: {
+        selectionPolicy: stored.orientation.selectionPolicy,
+        sourcePaths: stored.orientation.sourcePaths,
+        metrics: stored.orientation.metrics,
+      },
+      nextCommand: ".atlas/bin/atlas generation apply --artifact .atlas/state/generation/candidate.json",
+      requestDigest: stored.request.requestDigest,
+    });
+    process.exit(0);
+  }
+  // Re-read the full admitted inventory at each process boundary. A command
+  // adapter may run long enough for an unselected source to change after the
+  // request was stored, and neither invocation nor apply may trust that old
+  // inventory snapshot.
+  const invocationInventory = currentRepositoryInventory();
+  const result = runAtlasGenerationAdapter({
+    root,
+    request: stored.request,
+    generation: bound.instance.generation,
+    allowRemote: enabled("--allow-remote"),
+    repositoryInventory: invocationInventory,
+  });
+  const applyInventory = currentRepositoryInventory();
+  const applied = applyAtlasGenerationResult({
+    root,
+    request: stored.request,
+    result,
+    expectedMode: "command",
+    expectedProviderId: bound.instance.generation.providerId,
+    repositoryInventory: applyInventory,
+  });
+  const refreshed = await createAtlasInstanceProvider({ root });
+  const index = await refreshed.provider.rebuild();
+  print({
+    schema: "multihead-atlas.map_result.v1",
+    status: "pass",
+    mode: "command",
+    provider: result.provider,
+    orientation: {
+      selectionPolicy: stored.orientation.selectionPolicy,
+      sourcePaths: stored.orientation.sourcePaths,
+      metrics: stored.orientation.metrics,
+    },
+    semanticModel: {
+      schema: result.artifact.systemModel.schema,
+      rooms: result.artifact.systemModel.components.length,
+      relationships: result.artifact.systemModel.relationships.length,
+      flows: result.artifact.systemModel.flows.length,
+      unknowns: result.artifact.systemModel.unknowns.length,
+    },
+    acceptedPath: applied.acceptedPath,
+    currentPath: applied.currentPath,
+    index: { status: index.status, digest: index.digest, metrics: index.metrics },
+  });
+  process.exit(0);
+}
+
+if (command === "generation") {
+  const action = process.argv[3] || "status";
+  if (action === "status" || action === "test") {
+    const generation = atlasGenerationStatus({
+      root,
+      generation: bound.instance.generation,
+      repositoryInventory: currentRepositoryInventory(),
+    });
+    print({
+      ...generation,
+      operation: action,
+      liveInvocationPerformed: false,
+    });
+    process.exit(generation.status === "pass" ? 0 : 2);
+  }
+
+  if (action === "configure") {
+    const mode = process.argv[4];
+    let generation;
+    if (mode === "current-agent") {
+      generation = defaultAtlasGenerationConfig();
+    } else if (mode === "command") {
+      generation = validateAtlasGenerationConfig({
+        mode,
+        providerId: argValue("--id"),
+        adapterCommand: argValue("--command"),
+        dataBoundary: argValue("--data-boundary"),
+      });
+    } else {
+      throw new Error("Atlas generation configure requires current-agent or command");
+    }
+    const instance = writeAtlasInstanceGenerationConfig({
+      instancePath: path.join(root, ".atlas", "atlas.instance.json"),
+      generation,
+    });
+    print({
+      schema: "multihead-atlas.generation_configuration_result.v1",
+      status: "pass",
+      repositoryId: instance.repositoryId,
+      generation: instance.generation,
+    });
+    process.exit(0);
+  }
+
+  if (action === "request") {
+    const stored = createGenerationRequest();
+    print({
+      schema: "multihead-atlas.generation_request_result.v1",
+      status: "pass",
+      mode: bound.instance.generation.mode,
+      handshake: "request-agent-or-command-result-apply",
+      requestPath: stored.path,
+      request: stored.request,
+    });
+    process.exit(0);
+  }
+
+  if (action === "apply") {
+    const artifactPath = repositoryInputPath(argValue("--artifact"), "generation --artifact");
+    const result = JSON.parse(fs.readFileSync(artifactPath, "utf8"));
+    const request = readAtlasGenerationRequest({ root, requestDigest: result.requestDigest });
+    const applied = applyAtlasGenerationResult({
+      root,
+      request,
+      result,
+      expectedMode: bound.instance.generation.mode,
+      expectedProviderId: bound.instance.generation.mode === "command" ? bound.instance.generation.providerId : "",
+      repositoryInventory: request.task.kind === "repository-system-model" ? currentRepositoryInventory() : undefined,
+    });
+    const refreshed = await createAtlasInstanceProvider({ root });
+    const index = await refreshed.provider.rebuild();
+    print({
+      schema: "multihead-atlas.generation_apply_result.v1",
+      status: "pass",
+      acceptedPath: applied.acceptedPath,
+      currentPath: applied.currentPath,
+      index: { status: index.status, digest: index.digest, metrics: index.metrics },
+    });
+    process.exit(0);
+  }
+
+  if (action === "run") {
+    const stored = createGenerationRequest();
+    const result = runAtlasGenerationAdapter({
+      root,
+      request: stored.request,
+      generation: bound.instance.generation,
+      allowRemote: enabled("--allow-remote"),
+      repositoryInventory: stored.request.task.kind === "repository-system-model" ? currentRepositoryInventory() : undefined,
+    });
+    const applied = applyAtlasGenerationResult({
+      root,
+      request: stored.request,
+      result,
+      expectedMode: "command",
+      expectedProviderId: bound.instance.generation.providerId,
+      repositoryInventory: stored.request.task.kind === "repository-system-model" ? currentRepositoryInventory() : undefined,
+    });
+    const refreshed = await createAtlasInstanceProvider({ root });
+    const index = await refreshed.provider.rebuild();
+    print({
+      schema: "multihead-atlas.generation_run_result.v1",
+      status: "pass",
+      provider: result.provider,
+      artifact: result.artifact,
+      acceptedPath: applied.acceptedPath,
+      currentPath: applied.currentPath,
+      index: { status: index.status, digest: index.digest, metrics: index.metrics },
+    });
+    process.exit(0);
+  }
+
+  throw new Error(`Unknown Atlas generation command: ${action}`);
+}
+
+if (command === "index") {
+  const index = await bound.provider.rebuild();
+  print({
+    schema: "multihead-atlas.instance_index_result.v1",
+    status: index.status === "ready" ? "pass" : "fail",
+    repositoryId: bound.instance.repositoryId,
+    index,
+  });
+  process.exit(index.status === "ready" ? 0 : 1);
+}
+
+if (command === "search") {
+  await bound.provider.ensure();
+  const query = queryAfter("search");
+  if (!query) throw new Error("Atlas search requires a query");
+  const search = bound.provider.search({ query, limit: Number(argValue("--limit", "8")) });
+  print({
+    schema: "multihead-atlas.instance_search_result.v1",
+    status: search.status,
+    repositoryId: bound.instance.repositoryId,
+    query,
+    search,
+  });
+  process.exit(search.status === "pass" ? 0 : 1);
+}
+
+if (command === "evidence") {
+  const index = await bound.provider.ensure();
+  const query = queryAfter("evidence");
+  if (!query) throw new Error("Atlas evidence requires a query");
+  const search = bound.provider.search({ query, limit: Number(argValue("--limit", "8")) });
+  const evidence = buildAtlasEvidencePacket({
+    root,
+    instance: bound.instance,
+    catalog: bound.catalog,
+    providerDescription: bound.provider.describe(),
+    index,
+    search,
+  });
+  print(evidence);
+  process.exit(evidence.status === "pass" ? 0 : 1);
+}
+
+if (command === "graph") {
+  const providerCommand = bound.instance.graph.providerCommand
+    ? path.resolve(root, bound.instance.graph.providerCommand)
+    : path.join(runtimeAtlasRoot, "scripts", "atlas-provider");
+  const requestedRoom = argValue("--room", bound.instance.graph.defaultRoom);
+  // The repository authority names the overview and is never a room target;
+  // legacy instance bindings that store it as defaultRoom therefore launch at
+  // #architecture instead of manufacturing a self-entry URL.
+  const graphRoom = requestedRoom.toUpperCase() === bound.catalog.authority.toUpperCase()
+    ? ""
+    : requestedRoom;
+  const args = [
+    "--root", root,
+    "--provider-command", providerCommand,
+    "--room", graphRoom,
+  ];
+  for (const flag of ["--open", "--smoke"]) if (enabled(flag)) args.push(flag);
+  for (const option of ["--provider-port", "--graph-port"]) {
+    const value = argValue(option);
+    if (value) args.push(option, value);
+  }
+  runInstalledScript(path.join(runtimeAtlasRoot, "scripts", "atlas-graph"), args);
+}
+
+if (command === "sync") {
+  const syncCommand = process.argv[3] || "status";
+  const delegated = syncCommand === "status" ? "reconcile" : syncCommand;
+  const args = [
+    delegated,
+    "--repository", bound.instance.repositoryId,
+    "--exchange-root", bound.paths.exchangeRoot,
+  ];
+  if (["append", "id"].includes(delegated)) args.push("--namespace", bound.instance.sync.namespace);
+  args.push(...process.argv.slice(4));
+  runInstalledScript(path.join(runtimeAtlasRoot, "scripts", "atlas-sync"), args);
+}
+
+if (command === "update") {
+  const atlasSource = path.resolve(argValue("--atlas-source"));
+  const graphSource = path.resolve(argValue("--graph-source"));
+  if (!argValue("--atlas-source") || !argValue("--graph-source")) {
+    throw new Error("Atlas update requires --atlas-source and --graph-source");
+  }
+  const args = [
+    path.join(atlasSource, "scripts", "atlas-init"),
+    "--repo", root,
+    "--atlas-source", atlasSource,
+    "--graph-source", graphSource,
+    "--update",
+    "--with-graph",
+  ];
+  if (enabled("--allow-source-changes")) args.push("--allow-source-changes");
+  if (enabled("--refresh-agent-instructions")) args.push("--refresh-agent-instructions");
+  const result = childProcess.spawnSync(process.execPath, args, { cwd: root, env: process.env, stdio: "inherit" });
+  if (result.error) throw result.error;
+  process.exit(result.status ?? 1);
+}
+
+throw new Error(`Unknown Atlas instance command: ${command}`);

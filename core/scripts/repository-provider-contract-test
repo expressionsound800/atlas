@@ -1,0 +1,118 @@
+#!/usr/bin/env node
+
+/*
+ * Repository Provider Contract Test verifies the reusable facade against a
+ * caller-supplied generated-output path. The fixture contains no family memory
+ * and the test rejects missing inputs rather than exercising default paths.
+ */
+
+import path from "node:path";
+import {
+  ATLAS_REPOSITORY_PROVIDER_CONTRACT,
+  createAtlasRepositoryProvider,
+} from "../product/repository-provider.mjs";
+
+/** Reads a provider-fixture option from separated or equals-prefixed CLI syntax. */
+function argValue(name, fallback = "") {
+  const exact = process.argv.indexOf(name);
+  if (exact >= 0) return process.argv[exact + 1] || fallback;
+  const prefixed = process.argv.find((arg) => arg.startsWith(`${name}=`));
+  return prefixed ? prefixed.slice(name.length + 1) : fallback;
+}
+
+/** Checks one provider binding, index, quality, or ranking invariant. */
+function check(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+/** Verifies that a missing or invalid provider input rejects with the expected reason. */
+function rejects(operation, expected) {
+  try {
+    operation();
+  } catch (error) {
+    check(String(error?.message || error).includes(expected), `unexpected rejection: ${error}`);
+    return;
+  }
+  throw new Error(`expected rejection containing: ${expected}`);
+}
+
+const indexPath = argValue("--index-path", process.env.MEMORY_ARCHITECTURE_ATLAS_INDEX_PATH || "");
+check(indexPath && path.isAbsolute(indexPath), "--index-path must be an absolute registered technical-space path");
+
+const generatedAt = "2026-07-12T00:00:00.000Z";
+/** Builds one source-neutral catalog room for the repository-provider fixture. */
+const room = (id, label, summary) => ({
+  id,
+  label,
+  owner: "fixture-repository",
+  viewpoint: summary,
+  summary,
+  generatedSummary: summary,
+  summaryStatus: "provider-authored",
+  summarySource: "repository-provider-contract-fixture",
+  summaryUpdatedAt: generatedAt,
+  summaryDigest: `${id}-summary-digest`,
+  freshnessStatus: "source-digest-current",
+  freshnessDigest: `${id}-summary-digest`,
+  sourceRepos: ["fixture-repository"],
+  facets: [id, "contract-fixture"],
+  answers: [`where ${label} lives`],
+  metadata: { graphEndpoint: `/api/architecture-graph?slice=${id.toUpperCase()}` },
+});
+const catalog = {
+  schema: "fixture.repository_atlas_catalog.v1",
+  authority: "fixture-repository",
+  generatedAt,
+  rooms: [
+    room("fixture-root", "Fixture Root", "Repository-owned source and route authority."),
+    room("fixture-index", "Fixture Index", "Machine-local Atlas retrieval index."),
+  ],
+  portals: [{
+    id: "fixture-root:opens:fixture-index",
+    fromRoomId: "fixture-root",
+    toRoomId: "fixture-index",
+    label: "opens index",
+    kind: "opens_room",
+    traversalCost: 1,
+    bidirectional: false,
+  }],
+};
+
+rejects(() => createAtlasRepositoryProvider(), "repositoryId");
+rejects(() => createAtlasRepositoryProvider({ repositoryId: "fixture" }), "catalog object");
+rejects(() => createAtlasRepositoryProvider({ repositoryId: "fixture", catalog, indexPath: "relative.sqlite" }), "must be absolute");
+
+const provider = createAtlasRepositoryProvider({
+  repositoryId: "fixture-repository",
+  catalog,
+  indexPath,
+  generationProvider: "repository-provider-contract-test",
+});
+rejects(() => provider.search(), "search query");
+const index = await provider.rebuild();
+const status = provider.status();
+const lexical = provider.lexicalQuality();
+const vector = provider.vectorQuality();
+const search = provider.search({ query: "machine local retrieval index", limit: 2 });
+const explicitRoomSearch = provider.search({ query: "Fixture Index fixture-index", limit: 2 });
+const retrieval = provider.retrievalContract({ index });
+
+check(provider.contract === ATLAS_REPOSITORY_PROVIDER_CONTRACT, "provider contract identity changed");
+check(index.status === "ready" && status.status === "ready", "repository provider index is not ready");
+check(index.metrics.rooms === 2 && index.metrics.portals === 1, "repository provider fixture counts changed");
+check(lexical.status === "pass" && vector.status === "pass", "repository provider retrieval quality failed");
+check(search.results?.[0]?.id === "fixture-index", "repository provider search ranking changed");
+check(search.results?.[0]?.matchedTokenValues?.includes("retrieval"), "repository provider did not expose deterministic lexical match tokens");
+check(explicitRoomSearch.results?.[0]?.id === "fixture-index", "explicit room id did not remain the first search result");
+check(explicitRoomSearch.results?.[0]?.exactRoomIdMatch === true, "explicit room id match is not visible in search evidence");
+check(retrieval.indexed === true && retrieval.vectorIndexed === true, "repository provider retrieval contract is not indexed");
+
+console.log(JSON.stringify({
+  schema: "multihead-atlas.repository_provider_contract_test.v1",
+  status: "pass",
+  provider: provider.describe(),
+  index: { status: index.status, digest: index.digest, metrics: index.metrics },
+  quality: { lexical: lexical.status, vector: vector.status },
+  topResultId: search.results[0].id,
+  explicitRoomIdResult: explicitRoomSearch.results[0].id,
+}, null, 2));

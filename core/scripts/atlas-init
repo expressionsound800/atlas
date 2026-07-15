@@ -1,0 +1,255 @@
+#!/usr/bin/env node
+
+/*
+ * Atlas Init bootstraps or explicitly updates one repository-local instance
+ * from product source checkouts. Source checkout paths are command inputs only;
+ * tracked instance/installation files and the generated command shim remain
+ * path-neutral after the command returns.
+ */
+
+import childProcess from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import {
+  inspectAtlasAgentInstructions,
+  installAtlasAgentInstructions,
+} from "../product/agent-invocation-contract.mjs";
+import {
+  ATLAS_INSTALLATION_MANIFEST_SCHEMA,
+  installAtlasRuntime,
+  installGraphDependencies,
+  readAtlasDistributionProvenance,
+  readAtlasInstallationManifest,
+  verifyAtlasInstallation,
+} from "../product/installation-contract.mjs";
+import {
+  defaultAtlasInstanceConfig,
+  readAtlasInstanceConfig,
+  validateAtlasInstanceConfig,
+  writeAtlasInstanceCommandShim,
+} from "../product/instance-contract.mjs";
+import {
+  installAtlasIgnoreRules,
+  readAtlasRepositoryIntegration,
+  writeAtlasRepositoryIntegration,
+} from "../product/uninstall-contract.mjs";
+
+/** Reads one initializer option from separated or equals-prefixed argument syntax. */
+function argValue(name, fallback = "") {
+  const exact = process.argv.indexOf(name);
+  if (exact >= 0) return process.argv[exact + 1] || fallback;
+  const prefixed = process.argv.find((arg) => arg.startsWith(`${name}=`));
+  return prefixed ? prefixed.slice(name.length + 1) : fallback;
+}
+
+/** Collects every repeated value supplied for one multi-value initializer option. */
+function values(name) {
+  const rows = [];
+  for (let index = 0; index < process.argv.length; index += 1) {
+    if (process.argv[index] === name && process.argv[index + 1]) rows.push(process.argv[index + 1]);
+    else if (process.argv[index].startsWith(`${name}=`)) rows.push(process.argv[index].slice(name.length + 1));
+  }
+  return rows;
+}
+
+/** Checks whether an exact initializer flag was supplied by the caller. */
+function enabled(name) {
+  return process.argv.includes(name);
+}
+
+/** Reads the exact Git commit from a component checkout used for installation. */
+function sourceRevision(sourceRoot) {
+  const result = childProcess.spawnSync("git", ["rev-parse", "HEAD"], {
+    cwd: sourceRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.status !== 0) throw new Error(`Atlas init source is not a Git checkout: ${sourceRoot}`);
+  return result.stdout.trim();
+}
+
+/** Converts repository display text into the path-safe lowercase Atlas identity form. */
+function slug(value) {
+  const result = String(value || "").trim().toLowerCase().replace(/[^a-z0-9._-]+/gu, "-").replace(/^[^a-z0-9]+|[^a-z0-9]+$/gu, "");
+  if (!result) throw new Error("Atlas init could not derive a valid repository id; pass --repository-id");
+  return result;
+}
+
+/** Writes tracked instance JSON through a same-directory atomic staging replacement. */
+function writeJsonAtomic(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const staging = `${filePath}.writing-${process.pid}`;
+  fs.writeFileSync(staging, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  fs.renameSync(staging, filePath);
+}
+
+/**
+ * Detects Graph readiness from local generated dependency state, not installation-manifest intent.
+ * The installed Vite package is the launcher dependency that distinguishes a
+ * Graph-ready runtime from a source-only Graph copy across runtime updates.
+ */
+function hasInstalledGraphDependencies(root, runtimePath) {
+  return fs.existsSync(path.join(
+    path.resolve(root, runtimePath),
+    "graph",
+    "node_modules",
+    "vite",
+    "package.json",
+  ));
+}
+
+/** Prints initializer and update options together with their preservation guarantees. */
+function usage() {
+  console.log(`Usage:
+  scripts/atlas-init --repo PATH [--repository-id ID] [--include PATH] [--extension .EXT] [--with-graph]
+    [--atlas-source PATH] [--graph-source PATH] [--distribution-provenance PATH]
+    [--allow-source-changes]
+    [--no-agent-instructions] [--json]
+  scripts/atlas-init --repo PATH --update --atlas-source PATH --graph-source PATH
+    [--refresh-agent-instructions]
+
+Initialization creates tracked .atlas instance/installation/lock files and
+ignored runtime/state/bin paths. By default, initialization also creates or
+appends the deterministic Atlas managed block in root AGENTS.md. Update
+preserves atlas.instance.json and consumer instructions unless the explicit
+--refresh-agent-instructions option is supplied. Update also restores local
+Graph dependencies when the previous installed runtime was Graph-ready.`);
+}
+
+if (enabled("--help") || enabled("-h")) {
+  usage();
+  process.exit(0);
+}
+
+try {
+  if (enabled("--no-agent-instructions") && enabled("--refresh-agent-instructions")) {
+    throw new Error("Atlas init cannot combine --no-agent-instructions with --refresh-agent-instructions");
+  }
+  const root = path.resolve(argValue("--repo", argValue("--root", process.cwd())));
+  const atlasSource = path.resolve(argValue("--atlas-source", path.resolve(import.meta.dirname, "..")));
+  const graphSource = path.resolve(argValue("--graph-source", path.resolve(atlasSource, "..", "multihead-memory-graph")));
+  const distributionProvenancePath = argValue("--distribution-provenance")
+    ? path.resolve(argValue("--distribution-provenance"))
+    : "";
+  // The public wrapper supplies this path on every initialize and update. Its
+  // component revisions and file digests replace Git queries for archives;
+  // direct product-development invocations continue to use checkout state.
+  const distribution = distributionProvenancePath
+    ? readAtlasDistributionProvenance({
+      provenancePath: distributionProvenancePath,
+      atlasSource,
+      graphSource,
+      allowDevelopmentProvenance: enabled("--allow-source-changes"),
+    })
+    : null;
+  const atlasDir = path.join(root, ".atlas");
+  const instancePath = path.join(atlasDir, "atlas.instance.json");
+  const manifestPath = path.join(atlasDir, "atlas.install.json");
+  const requestedIncludes = values("--include");
+  const requestedExtensions = values("--extension");
+  const previousIntegration = readAtlasRepositoryIntegration(path.join(atlasDir, "atlas.lock.json"));
+  fs.mkdirSync(root, { recursive: true });
+  fs.mkdirSync(atlasDir, { recursive: true });
+
+  let instance;
+  if (fs.existsSync(instancePath)) {
+    if (requestedIncludes.length || requestedExtensions.length) {
+      throw new Error("Atlas init accepts --include and --extension only when creating a new instance; edit the tracked source policy explicitly for an existing instance");
+    }
+    instance = readAtlasInstanceConfig(instancePath);
+  } else {
+    const configured = defaultAtlasInstanceConfig({ repositoryId: slug(argValue("--repository-id", path.basename(root))) });
+    instance = validateAtlasInstanceConfig({
+      ...configured,
+      source: {
+        ...configured.source,
+        include: requestedIncludes.length ? requestedIncludes : configured.source.include,
+        extensions: [...configured.source.extensions, ...requestedExtensions],
+      },
+    });
+    writeJsonAtomic(instancePath, instance);
+    instance = readAtlasInstanceConfig(instancePath);
+  }
+
+  let manifest;
+  if (fs.existsSync(manifestPath) && !enabled("--update")) {
+    manifest = readAtlasInstallationManifest(manifestPath);
+  } else {
+    const existing = fs.existsSync(manifestPath) ? readAtlasInstallationManifest(manifestPath) : null;
+    manifest = {
+      schema: ATLAS_INSTALLATION_MANIFEST_SCHEMA,
+      installationId: existing?.installationId || instance.repositoryId,
+      scope: existing?.scope || "repository",
+      runtimePath: existing?.runtimePath || ".atlas/runtime",
+      statePath: existing?.statePath || ".atlas/state",
+      packages: {
+        atlas: {
+          version: distribution?.packages.atlas.version || fs.readFileSync(path.join(atlasSource, "VERSION"), "utf8").trim(),
+          revision: distribution?.packages.atlas.revision || sourceRevision(atlasSource),
+        },
+        graph: {
+          version: distribution?.packages.graph.version || JSON.parse(fs.readFileSync(path.join(graphSource, "package.json"), "utf8")).version,
+          revision: distribution?.packages.graph.revision || sourceRevision(graphSource),
+        },
+      },
+    };
+    writeJsonAtomic(manifestPath, manifest);
+    manifest = readAtlasInstallationManifest(manifestPath);
+  }
+
+  // Runtime replacement removes node_modules. Capture Graph readiness before
+  // installAtlasRuntime swaps the tree so update can restore the same local
+  // capability without requiring the caller to repeat --with-graph.
+  const shouldInstallGraphDependencies = enabled("--with-graph")
+    || (enabled("--update") && hasInstalledGraphDependencies(root, manifest.runtimePath));
+  const installed = installAtlasRuntime({
+    root,
+    manifestPath,
+    atlasSource,
+    graphSource,
+    distributionProvenancePath,
+    allowSourceChanges: enabled("--allow-source-changes"),
+  });
+  if (shouldInstallGraphDependencies) installGraphDependencies(installed.runtimeRoot);
+  const commandPath = writeAtlasInstanceCommandShim({
+    root,
+    instancePath,
+    runtimePath: manifest.runtimePath,
+  });
+  // Initialization is the only default durable instruction mutation. Product
+  // update preserves the consumer file unless refresh is explicitly requested.
+  const shouldInstallAgentInstructions = !enabled("--no-agent-instructions")
+    && (!enabled("--update") || enabled("--refresh-agent-instructions"));
+  const agentInstructions = shouldInstallAgentInstructions
+    ? installAtlasAgentInstructions({ root })
+    : inspectAtlasAgentInstructions({ root });
+  const ignoreRules = installAtlasIgnoreRules({ root });
+  const repositoryIntegration = writeAtlasRepositoryIntegration({
+    lockPath: installed.lockPath,
+    previous: previousIntegration,
+    agentInstructions,
+    ignoreRules,
+  });
+  const verification = verifyAtlasInstallation({ root, manifestPath });
+  const payload = {
+    schema: "multihead-atlas.instance_init_result.v1",
+    status: verification.status,
+    mode: enabled("--update") ? "update" : "initialize",
+    repositoryId: instance.repositoryId,
+    root,
+    instancePath,
+    manifestPath,
+    lockPath: installed.lockPath,
+    commandPath,
+    agentInstructions,
+    ignoreRules,
+    repositoryIntegration,
+    installation: verification,
+  };
+  if (enabled("--json")) console.log(JSON.stringify(payload, null, 2));
+  else console.log(`Atlas instance ${payload.status}: ${payload.repositoryId}\nCommand: ${commandPath}\nAgent instructions: ${agentInstructions.status} (${agentInstructions.action || "preserved"})`);
+  process.exit(payload.status === "pass" ? 0 : 1);
+} catch (error) {
+  console.error(error?.stack || error?.message || String(error));
+  process.exit(1);
+}

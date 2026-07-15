@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# This recovery wrapper executes the reviewed Core uninstaller outside the
+# consumer control plane so a missing or damaged installed shim is removable.
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+DISTRIBUTION_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+
+exec node "$DISTRIBUTION_ROOT/core/scripts/atlas-uninstall" "$@"
